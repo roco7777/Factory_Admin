@@ -7,6 +7,7 @@ import 'carrito_screen.dart';
 import 'inventario_screen.dart';
 import 'login_screen.dart';
 import 'admin_login_screen.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 class TiendaScreen extends StatefulWidget {
   final String baseUrl;
@@ -88,9 +89,15 @@ class _TiendaScreenState extends State<TiendaScreen> {
       }
 
       // 2. Cargamos inventario
+      // 1. AGREGA ESTA LÍNEA (Define qué vamos a buscar al inicio)
+      String busqueda = categoriaSeleccionada == "TODOS"
+          ? ""
+          : categoriaSeleccionada;
+
+      // 2. AHORA SÍ, USA LA VARIABLE 'busqueda'
       final response = await http.get(
         Uri.parse(
-          '${widget.baseUrl}/api/inventario?q=$busqueda&page=$_paginaActual&idSuc=$sucursalSeleccionada',
+          '${widget.baseUrl}/api/inventario?q=$busqueda&page=0&idSuc=$sucursalSeleccionada',
         ),
       );
 
@@ -136,25 +143,31 @@ class _TiendaScreenState extends State<TiendaScreen> {
         String? savedNombre = prefs.getString('saved_sucursal_nombre');
 
         setState(() {
-        sucursales = data;
-        if (sucursales.isNotEmpty) {
-          if (savedId != null) {
-            // Si hay una guardada, intentamos encontrarla en la lista que bajó de la API
-            sucursalActual = sucursales.firstWhere(
-              (s) => (s['ID'] ?? s['id'] ?? s['Id']).toString() == savedId.toString(),
-              orElse: () => sucursales[0], // Si no la encuentra, usa la primera
-            );
-            sucursalSeleccionada = savedId;
-            nombreSucursal = savedNombre ?? "Sucursal";
-          } else {
-            // Si es la primera vez (no hay nada guardado), usa la primera por defecto
-            sucursalActual = sucursales[0];
-            var rawId = sucursalActual['ID'] ?? sucursalActual['id'] ?? sucursalActual['Id'];
-            sucursalSeleccionada = int.tryParse(rawId.toString()) ?? 1;
-            nombreSucursal = sucursalActual['sucursal'] ?? "Sucursal";
+          sucursales = data;
+          if (sucursales.isNotEmpty) {
+            if (savedId != null) {
+              // Si hay una guardada, intentamos encontrarla en la lista que bajó de la API
+              sucursalActual = sucursales.firstWhere(
+                (s) =>
+                    (s['ID'] ?? s['id'] ?? s['Id']).toString() ==
+                    savedId.toString(),
+                orElse: () =>
+                    sucursales[0], // Si no la encuentra, usa la primera
+              );
+              sucursalSeleccionada = savedId;
+              nombreSucursal = savedNombre ?? "Sucursal";
+            } else {
+              // Si es la primera vez (no hay nada guardado), usa la primera por defecto
+              sucursalActual = sucursales[0];
+              var rawId =
+                  sucursalActual['ID'] ??
+                  sucursalActual['id'] ??
+                  sucursalActual['Id'];
+              sucursalSeleccionada = int.tryParse(rawId.toString()) ?? 1;
+              nombreSucursal = sucursalActual['sucursal'] ?? "Sucursal";
+            }
           }
-        }
-      });
+        });
         _cargarDatosIniciales();
       }
     } catch (e) {
@@ -258,26 +271,26 @@ class _TiendaScreenState extends State<TiendaScreen> {
   }
 
   void _cambiarSucursal(dynamic suc) async {
-  // 1. Obtenemos la instancia de memoria
-  final prefs = await SharedPreferences.getInstance();
-  
-  var rawId = suc['ID'] ?? suc['id'] ?? suc['Id'];
-  int id = int.tryParse(rawId.toString()) ?? 1;
-  String nombre = suc['sucursal'] ?? "Sucursal";
+    // 1. Obtenemos la instancia de memoria
+    final prefs = await SharedPreferences.getInstance();
 
-  // 2. Guardamos permanentemente
-  await prefs.setInt('saved_sucursal_id', id);
-  await prefs.setString('saved_sucursal_nombre', nombre);
+    var rawId = suc['ID'] ?? suc['id'] ?? suc['Id'];
+    int id = int.tryParse(rawId.toString()) ?? 1;
+    String nombre = suc['sucursal'] ?? "Sucursal";
 
-  setState(() {
-    sucursalActual = suc;
-    sucursalSeleccionada = id;
-    nombreSucursal = nombre;
-    productos = [];
-    _paginaActual = 0;
-  });
-  _cargarDatosIniciales();
-}
+    // 2. Guardamos permanentemente
+    await prefs.setInt('saved_sucursal_id', id);
+    await prefs.setString('saved_sucursal_nombre', nombre);
+
+    setState(() {
+      sucursalActual = suc;
+      sucursalSeleccionada = id;
+      nombreSucursal = nombre;
+      productos = [];
+      _paginaActual = 0;
+    });
+    _cargarDatosIniciales();
+  }
 
   Future<void> _actualizarContadorCarrito() async {
     try {
@@ -323,6 +336,17 @@ class _TiendaScreenState extends State<TiendaScreen> {
     }
   }
 
+  // --- AGREGAR ESTA DEFINICIÓN ---
+  final AudioPlayer _audioPlayer = AudioPlayer();
+
+  Future<void> _reproducirBip() async {
+    try {
+      await _audioPlayer.play(AssetSource('sounds/beep.mp3'));
+    } catch (e) {
+      debugPrint("Error al reproducir sonido: $e");
+    }
+  }
+
   Future<void> buscarProductos(String query) async {
     setState(() {
       cargando = true;
@@ -342,6 +366,9 @@ class _TiendaScreenState extends State<TiendaScreen> {
           productos = data;
           _hayMasProductos = data.length >= 10;
         });
+        if (data.isNotEmpty) {
+          buscadorCtrl.clear();
+        }
       }
     } finally {
       setState(() => cargando = false);
@@ -363,6 +390,7 @@ class _TiendaScreenState extends State<TiendaScreen> {
       );
       if (res.statusCode == 200) {
         Navigator.pop(context);
+        _reproducirBip();
         Future.delayed(const Duration(milliseconds: 200), () {
           if (mounted) _actualizarContadorCarrito();
         });
@@ -476,13 +504,12 @@ class _TiendaScreenState extends State<TiendaScreen> {
               // Borramos los datos del cliente
               await prefs.remove('cliente_id');
               await prefs.remove('cliente_nombre');
-             
 
               if (!mounted) return;
               Navigator.pop(context); // Cerramos el diálogo
               setState(() {
-                  nombreCliente = "Invitado";
-                });
+                nombreCliente = "Invitado";
+              });
               // Refrescamos la sesión para que cambie a "Invitado"
               _cargarSesion();
 
@@ -507,6 +534,11 @@ class _TiendaScreenState extends State<TiendaScreen> {
     double p3 = double.tryParse(item['Precio3']?.toString() ?? '0') ?? 0.0;
     int min2 = (double.tryParse(item['Min2']?.toString() ?? '0') ?? 0).toInt();
     int min3 = (double.tryParse(item['Min3']?.toString() ?? '0') ?? 0).toInt();
+
+    // --- NUEVO: Extraemos el stock que viene del servidor ---
+    int stockDisponible =
+        int.tryParse(item['stock_disponible']?.toString() ?? '0') ?? 0;
+
     double precioCalculado = p1;
 
     showModalBottomSheet(
@@ -528,6 +560,16 @@ class _TiendaScreenState extends State<TiendaScreen> {
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 16,
+                ),
+              ),
+              // --- NUEVO: Indicador visual de stock ---
+              const SizedBox(height: 5),
+              Text(
+                "Stock disponible: $stockDisponible pzas",
+                style: TextStyle(
+                  fontSize: 13,
+                  color: stockDisponible > 0 ? Colors.blueGrey : Colors.red,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
               const SizedBox(height: 15),
@@ -565,11 +607,41 @@ class _TiendaScreenState extends State<TiendaScreen> {
                 width: double.infinity,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(backgroundColor: rojoFactory),
-                  onPressed: () => _guardarEnCarrito(
-                    item['Id'],
-                    cantCtrl.text,
-                    precioCalculado,
-                  ),
+                  onPressed: () {
+                    // --- EL CANDADO DE SEGURIDAD ---
+                    int cant = int.tryParse(cantCtrl.text) ?? 0;
+
+                    // 1. Validar que sea mayor a 0
+                    if (cant <= 0) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text("La cantidad debe ser mayor a cero"),
+                          backgroundColor: Colors.orange,
+                        ),
+                      );
+                      return;
+                    }
+
+                    // 2. Validar que no supere el stock
+                    if (cant > stockDisponible) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            "Solo hay $stockDisponible unidades disponibles",
+                          ),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                      return;
+                    }
+
+                    // Si pasa los filtros, guardamos
+                    _guardarEnCarrito(
+                      item['Id'],
+                      cant.toString(),
+                      precioCalculado,
+                    );
+                  },
                   child: const Text(
                     "AGREGAR AL CARRITO",
                     style: TextStyle(color: Colors.white),
@@ -651,16 +723,16 @@ class _TiendaScreenState extends State<TiendaScreen> {
                 ],
               ),
               // Nombre del cliente DEBAJO
-                Text(
-                  (nombreCliente == null || nombreCliente == "Invitado")
-                      ? "Hola invitado"
-                      : "Hola, $nombreCliente",
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                  ),
+              Text(
+                (nombreCliente == null || nombreCliente == "Invitado")
+                    ? "Hola invitado"
+                    : "Hola, $nombreCliente",
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
                 ),
+              ),
             ],
           ),
         ),
@@ -716,29 +788,31 @@ class _TiendaScreenState extends State<TiendaScreen> {
                   _mostrarModalSucursales, // Asegúrate de que esta sea tu función
             ),
           // 3. CERRAR SESIÓN (Ahora al final)
-         IconButton(
-          icon: Icon(
-            // Si es invitado, mostramos un icono de "Usuario/Perfil" para invitar a entrar
-            // Si ya inició sesión, mostramos el icono clásico de "Salir"
-            nombreCliente == "Invitado" 
-                ? Icons.account_circle_outlined 
-                : Icons.exit_to_app, 
-            size: 26, // Lo hacemos un poco más grande para que se vea mejor
+          IconButton(
+            icon: Icon(
+              // Si es invitado, mostramos un icono de "Usuario/Perfil" para invitar a entrar
+              // Si ya inició sesión, mostramos el icono clásico de "Salir"
+              nombreCliente == "Invitado"
+                  ? Icons.account_circle_outlined
+                  : Icons.exit_to_app,
+              size: 26, // Lo hacemos un poco más grande para que se vea mejor
+            ),
+            tooltip: nombreCliente == "Invitado"
+                ? "Iniciar Sesión"
+                : "Cerrar Sesión",
+            onPressed: () {
+              if (nombreCliente == "Invitado") {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => LoginScreen(baseUrl: widget.baseUrl),
+                  ),
+                ).then((_) => _cargarSesion());
+              } else {
+                _mostrarDialogoCerrarSesion();
+              }
+            },
           ),
-          tooltip: nombreCliente == "Invitado" ? "Iniciar Sesión" : "Cerrar Sesión",
-          onPressed: () {
-            if (nombreCliente == "Invitado") {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => LoginScreen(baseUrl: widget.baseUrl),
-                ),
-              ).then((_) => _cargarSesion());
-            } else {
-              _mostrarDialogoCerrarSesion();
-            }
-          },
-        ),
         ],
         bottom: PreferredSize(
           // Reducimos la altura de 110 a 90 para que sea más delgada

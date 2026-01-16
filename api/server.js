@@ -89,34 +89,32 @@ app.post('/api/producto/delete-foto', async (req, res) => {
     }
 });
 
-// ENDPOINT PARA AGREGAR AL CARRITO
-app.post('/api/agregar_carrito', async (req, res) => {
-    let { p_id, qty, p_price, ip_add, num_suc } = req.body;
-    const user_ip = ip_add || 'APP_USER';
-    
-    // VALIDACIÓN DE SEGURIDAD: Convertir qty a entero
-    const cantidad = parseInt(qty) || 1; // Si llega vacío o error, pone 1 por defecto
-
+// RUTA CRÍTICA: Obtener un solo producto para la pantalla de EDICIÓN
+app.get('/api/producto/:clave', async (req, res) => {
+    const { clave } = req.params;
+    const query = `
+        SELECT p.*, 
+               a1.ExisPVentas AS alm1_pventas, a1.ExisBodega AS alm1_bodega, a1.ACTIVO AS alm1_activo,
+               a2.ExisPVentas AS alm2_pventas, a2.ExisBodega AS alm2_bodega, a2.ACTIVO AS alm2_activo,
+               a3.ExisPVentas AS alm3_pventas, a3.ExisBodega AS alm3_bodega, a3.ACTIVO AS alm3_activo,
+               a4.ExisPVentas AS alm4_pventas, a4.ExisBodega AS alm4_bodega, a4.ACTIVO AS alm4_activo,
+               a5.ExisPVentas AS alm5_pventas, a5.ExisBodega AS alm5_bodega, a5.ACTIVO AS alm5_activo 
+        FROM productos p 
+        LEFT JOIN alm1 a1 ON p.Clave = CONVERT(a1.Clave USING utf8mb3)
+        LEFT JOIN alm2 a2 ON p.Clave = CONVERT(a2.Clave USING utf8mb3)
+        LEFT JOIN alm3 a3 ON p.Clave = CONVERT(a3.Clave USING utf8mb3)
+        LEFT JOIN alm4 a4 ON p.Clave = CONVERT(a4.Clave USING utf8mb3)
+        LEFT JOIN alm5 a5 ON p.Clave = CONVERT(a5.Clave USING utf8mb3)
+        WHERE p.Clave = ?`;
     try {
-        const [existente] = await db.execute(
-            "SELECT num_suc FROM cart WHERE ip_add = ? AND num_suc != ? LIMIT 1", 
-            [user_ip, num_suc]
-        );
-
-        if (existente.length > 0) {
-            return res.status(400).json({ success: false, error: "DIFERENTE_SUCURSAL" });
-        }
-
-        const sql = "REPLACE INTO cart (p_id, ip_add, qty, p_price, num_suc) VALUES (?, ?, ?, ?, ?)";
-        // Usamos 'cantidad' en lugar de 'qty'
-        await db.execute(sql, [p_id, user_ip, cantidad, p_price, num_suc]);
-        
-        res.json({ success: true });
+        const [results] = await db.execute(query, [clave]);
+        res.json(results[0] || {}); // Enviamos el primer resultado o un objeto vacío
     } catch (e) {
-        console.error("Error en agregar_carrito:", e.message);
-        res.status(500).json({ success: false, error: e.message });
+        console.error("Error al obtener producto individual:", e.message);
+        res.status(500).json({ error: e.message });
     }
 });
+
 
 // RUTA PARA VACIAR EL CARRITO (Necesaria para el botón de la App)
 app.post('/api/carrito/vaciar', async (req, res) => {
@@ -132,56 +130,83 @@ app.post('/api/carrito/vaciar', async (req, res) => {
 
 //finalizar pedido
 // FINALIZAR PEDIDO: Mueve del carrito a pending_orders
+// FINALIZAR PEDIDO: Con validación de stock de último segundo
 app.post('/api/finalizar_pedido', async (req, res) => {
     const { ip_add, customer_id, num_suc } = req.body;
-    
-    // Generamos un número de factura/cotización único basado en el tiempo
+    const user_ip = ip_add || 'APP_USER';
+    const tablaAlm = `alm${num_suc}`; // alm1, alm2, etc.
     const invoice_no = Math.floor(Date.now() / 1000); 
 
+    let conn;
     try {
-        // 1. Obtener los productos que el usuario tiene en el carrito
-        const [cartItems] = await db.execute(
-            "SELECT p_id, qty, p_price FROM cart WHERE ip_add = ?", 
-            [ip_add || 'APP_USER']
+        conn = await db.getConnection();
+        await conn.beginTransaction(); // Iniciamos transacción para que nada falle a medias
+
+        // 1. Obtener productos del carrito con su CLAVE y DESCRIPCION (unimos con tabla productos)
+        const [cartItems] = await conn.execute(
+            `SELECT c.p_id, c.qty, c.p_price, p.Clave, p.Descripcion 
+             FROM cart c 
+             JOIN productos p ON c.p_id = p.Id 
+             WHERE c.ip_add = ?`, 
+            [user_ip]
         );
 
         if (cartItems.length === 0) {
+            await conn.rollback();
             return res.status(400).json({ success: false, message: "El carrito está vacío" });
         }
 
-        // 2. Insertar cada producto en pending_orders
-        // Usamos un bucle para asegurar que cada item se registre
+        // 2. VALIDACIÓN DE STOCK REAL
         for (const item of cartItems) {
-            await db.execute(
+            const [stockData] = await conn.execute(
+                `SELECT ExisPVentas FROM ${tablaAlm} WHERE Clave = ?`, 
+                [item.Clave]
+            );
+
+            const existenciaActual = stockData[0]?.ExisPVentas || 0;
+
+            if (existenciaActual < item.qty) {
+                // Si un solo producto no tiene stock, cancelamos TODO el pedido
+                await conn.rollback();
+                return res.status(400).json({ 
+                    success: false, 
+                    error: "SIN_STOCK",
+                    message: `Stock insuficiente para: ${item.Descripcion}. Disponible: ${existenciaActual}, Solicitado: ${item.qty}` 
+                });
+            }
+        }
+
+        // 3. Si llegamos aquí, hay stock de todo. Procedemos a insertar en pending_orders
+        for (const item of cartItems) {
+            await conn.execute(
                 `INSERT INTO pending_orders 
                 (customer_id, invoice_no, product_id, qty, p_price, order_status, order_date, num_suc) 
                 VALUES (?, ?, ?, ?, ?, 'PENDIENTE', NOW(), ?)`,
-                [
-                    customer_id || 0, 
-                    invoice_no, 
-                    item.p_id, 
-                    item.qty, 
-                    item.p_price, 
-                    num_suc
-                ]
+                [customer_id || 0, invoice_no, item.p_id, item.qty, item.p_price, num_suc]
             );
+
+            // OPCIONAL: Aquí podrías restar el stock de una vez si quisieras, 
+            // pero si tu sistema administrativo lo hace al procesar la factura, déjalo así.
         }
 
-        // 3. Una vez movidos, vaciamos el carrito de este usuario
-        await db.execute("DELETE FROM cart WHERE ip_add = ?", [ip_add || 'APP_USER']);
+        // 4. Vaciamos el carrito
+        await conn.execute("DELETE FROM cart WHERE ip_add = ?", [user_ip]);
 
+        await conn.commit(); // Guardamos todos los cambios en la DB
         res.json({ 
             success: true, 
-            message: "Cotización guardada", 
+            message: "¡Pedido verificado y guardado!", 
             invoice_no: invoice_no 
         });
 
     } catch (e) {
-        console.error("Error al finalizar pedido:", e.message);
+        if (conn) await conn.rollback();
+        console.error("Error crítico en finalizar_pedido:", e.message);
         res.status(500).json({ success: false, error: e.message });
+    } finally {
+        if (conn) conn.release();
     }
 });
-
 // ==========================================
 // LOGIN Y CATALOGOS
 // ==========================================
@@ -350,35 +375,34 @@ app.get('/api/carrito/contar', async (req, res) => {
 });
 
 // AGREGAR AL CARRITO (Asegúrate de que este bloque esté en server.js)
+// BUSCA ESTA RUTA Y AJUSTA EL SQL:
 app.post('/api/agregar_carrito', async (req, res) => {
-    const { p_id, qty, p_price, ip_add, num_suc } = req.body; // Recibimos num_suc
+    let { p_id, qty, p_price, ip_add, num_suc } = req.body;
     const user_ip = ip_add || 'APP_USER';
     
+    // Forzamos que sea un número real. Si no se puede, es 1.
+    const cantidad = Number(qty) || 1; 
+    const precio = Number(p_price) || 0;
+
     try {
-        // 1. Verificamos si ya hay productos de OTRA sucursal
-        const [existente] = await db.execute(
-            "SELECT num_suc FROM cart WHERE ip_add = ? AND num_suc != ? LIMIT 1", 
-            [user_ip, num_suc]
-        );
+        // ... (validación de sucursal)
 
-        if (existente.length > 0) {
-            return res.status(400).json({ 
-                success: false, 
-                error: "DIFERENTE_SUCURSAL",
-                message: "Ya tienes productos de otra sucursal. Vacía el carrito para cambiar de almacén." 
-            });
-        }
-
-        // 2. Si es la misma sucursal o está vacío, procedemos con REPLACE
-        const sql = "REPLACE INTO cart (p_id, ip_add, qty, p_price, num_suc) VALUES (?, ?, ?, ?, ?)";
-        await db.execute(sql, [p_id, user_ip, qty, p_price, num_suc]);
+        const sql = `
+            INSERT INTO cart (p_id, ip_add, qty, p_price, num_suc) 
+            VALUES (?, ?, ?, ?, ?) 
+            ON DUPLICATE KEY UPDATE 
+                qty = qty + VALUES(qty), 
+                p_price = VALUES(p_price)`;
         
-        res.json({ success: true, message: "Carrito actualizado" });
+        // Usamos las constantes 'cantidad' y 'precio' que ya son números
+        await db.execute(sql, [p_id, user_ip, cantidad, precio, num_suc]);
+        
+        res.json({ success: true });
     } catch (e) {
+        console.error("Error en agregar_carrito:", e.message);
         res.status(500).json({ success: false, error: e.message });
     }
 });
-
 // ELIMINAR DEL CARRITO
 app.post('/api/carrito/eliminar', async (req, res) => {
     const { p_id, ip_add } = req.body;
@@ -401,7 +425,8 @@ app.post('/api/carrito/eliminar', async (req, res) => {
 app.get('/api/inventario', async (req, res) => {
     const qRaw = req.query.q || '';
     const page = parseInt(req.query.page) || 0; 
-    const limit = 10; // Mantenemos tu límite de 10
+    const idSuc = req.query.idSuc || 1; 
+    const limit = 10; 
     const offset = page * limit;
     const q = `%${qRaw.toLowerCase()}%`;
     
@@ -409,32 +434,41 @@ app.get('/api/inventario', async (req, res) => {
         let query;
         let params;
 
+        const camposSelect = `
+            p.Id, p.Clave, p.Descripcion, p.Precio1, p.Precio2, p.Precio3, 
+            p.Min1, p.Min2, p.Min3, p.Foto, p.Tipo, p.status, p.Activo,
+            CAST(COALESCE(a.ExisPVentas, 0) AS SIGNED) as stock_disponible
+        `;
+
         if (qRaw === '') {
-            // --- CAMBIO QUIRÚRGICO AQUÍ ---
-            // Cambiamos ORDER BY Id DESC por ORDER BY RAND()
-            // Esto hará que cada vez que entres a la app o cambies de sucursal, los 10 productos sean distintos
-            query = `SELECT Id, Clave, Descripcion, Precio1, Precio2, Precio3, Min1, Min2, Min3, Foto, Tipo, status, Activo 
-                     FROM PRODUCTOS WHERE status = 1 ORDER BY RAND() LIMIT ? OFFSET ?`;
+            // Filtramos por status = 1 Y por existencia > 0
+            query = `SELECT ${camposSelect}
+                     FROM PRODUCTOS p
+                     LEFT JOIN alm${idSuc} a ON p.Clave = CONVERT(a.Clave USING utf8mb3)
+                     WHERE p.status = 1 AND COALESCE(a.ExisPVentas, 0) > 0
+                     ORDER BY RAND() 
+                     LIMIT ? OFFSET ?`;
             params = [limit, offset];
         } else {
-            // Cuando el usuario busca algo, mantenemos el orden por Descripción para que sea fácil de leer
-            query = `SELECT Id, Clave, Descripcion, Precio1, Precio2, Precio3, Min1, Min2, Min3, Foto, Tipo, status, Activo 
-                    FROM PRODUCTOS WHERE (LOWER(Clave) LIKE ? OR LOWER(Descripcion) LIKE ? OR LOWER(Tipo) LIKE ?) 
-                    AND status = 1 ORDER BY Descripcion ASC LIMIT ? OFFSET ?`;
+            // Filtramos por búsqueda, status = 1 Y por existencia > 0
+            query = `SELECT ${camposSelect}
+                     FROM PRODUCTOS p
+                     LEFT JOIN alm${idSuc} a ON p.Clave = CONVERT(a.Clave USING utf8mb3)
+                     WHERE (LOWER(p.Clave) LIKE ? OR LOWER(p.Descripcion) LIKE ? OR LOWER(p.Tipo) LIKE ?) 
+                     AND p.status = 1 AND COALESCE(a.ExisPVentas, 0) > 0
+                     ORDER BY p.Descripcion ASC 
+                     LIMIT ? OFFSET ?`;
             params = [q, q, q, limit, offset];
         }
 
         const [results] = await db.execute(query, params);
         res.json(results);
     } catch (e) { 
-        console.error("Error en Inventario:", e.message);
+        console.error("Error en Inventario Tienda:", e.message);
         res.status(500).json({ error: e.message }); 
     }
 });
-app.get('/api/producto/:clave', async (req, res) => {
-    const query = `SELECT p.*, a1.ExisPVentas AS alm1_pventas, a1.ExisBodega AS alm1_bodega, a1.ACTIVO AS alm1_activo, a2.ExisPVentas AS alm2_pventas, a2.ExisBodega AS alm2_bodega, a2.ACTIVO AS alm2_activo, a3.ExisPVentas AS alm3_pventas, a3.ExisBodega AS alm3_bodega, a3.ACTIVO AS alm3_activo, a4.ExisPVentas AS alm4_pventas, a4.ExisBodega AS alm4_bodega, a4.ACTIVO AS alm4_activo, a5.ExisPVentas AS alm5_pventas, a5.ExisBodega AS alm5_bodega, a5.ACTIVO AS alm5_activo FROM PRODUCTOS p LEFT JOIN alm1 a1 ON p.Clave = a1.Clave LEFT JOIN alm2 a2 ON p.Clave = a2.Clave LEFT JOIN alm3 a3 ON p.Clave = a3.Clave LEFT JOIN alm4 a4 ON p.Clave = a4.Clave LEFT JOIN alm5 a5 ON p.Clave = a5.Clave WHERE p.Clave = ?`;
-    try { const [results] = await db.execute(query, [req.params.clave]); res.json(results[0] || {}); } catch (e) { res.status(500).json({ error: e.message }); }
-});
+
 
 
 // --- RUTA ALTA PRODUCTO ---
@@ -542,6 +576,59 @@ app.post('/api/abmc/producto/nuevo', async (req, res) => {
     }
 });
 
+// NUEVA RUTA: Exclusiva para Administración (Muestra TODO)
+// RUTA ADMIN: Trae existencias calculadas [Piezas + (Cajas * PzasxCaja)]
+app.get('/api/admin/inventario', async (req, res) => {
+    const qRaw = req.query.q || '';
+    const page = parseInt(req.query.page) || 0; 
+    const limit = 15; 
+    const offset = page * limit;
+    const q = `%${qRaw.toLowerCase()}%`;
+
+    try {
+        const query = `
+            SELECT 
+                p.Id, 
+                TRIM(p.Clave) as Clave, 
+                p.Descripcion, p.PzasxCaja, p.Precio1, p.Precio2, p.Precio3, 
+                p.Min1, p.Min2, p.Min3, p.Foto, p.status, p.Activo, p.Tipo, p.CB, p.ClavePro,
+                
+                CAST(COALESCE(MAX(a1.ExisPVentas), 0) + (COALESCE(MAX(a1.ExisBodega), 0) * COALESCE(p.PzasxCaja, 1)) AS SIGNED) AS stock1,
+                CAST(COALESCE(MAX(a2.ExisPVentas), 0) + (COALESCE(MAX(a2.ExisBodega), 0) * COALESCE(p.PzasxCaja, 1)) AS SIGNED) AS stock2,
+                CAST(COALESCE(MAX(a3.ExisPVentas), 0) + (COALESCE(MAX(a3.ExisBodega), 0) * COALESCE(p.PzasxCaja, 1)) AS SIGNED) AS stock3,
+                CAST(COALESCE(MAX(a4.ExisPVentas), 0) + (COALESCE(MAX(a4.ExisBodega), 0) * COALESCE(p.PzasxCaja, 1)) AS SIGNED) AS stock4,
+                CAST(COALESCE(MAX(a5.ExisPVentas), 0) + (COALESCE(MAX(a5.ExisBodega), 0) * COALESCE(p.PzasxCaja, 1)) AS SIGNED) AS stock5
+            FROM productos p
+            LEFT JOIN alm1 a1 ON p.Clave = CONVERT(a1.Clave USING utf8mb3)
+            LEFT JOIN alm2 a2 ON p.Clave = CONVERT(a2.Clave USING utf8mb3)
+            LEFT JOIN alm3 a3 ON p.Clave = CONVERT(a3.Clave USING utf8mb3)
+            LEFT JOIN alm4 a4 ON p.Clave = CONVERT(a4.Clave USING utf8mb3)
+            LEFT JOIN alm5 a5 ON p.Clave = CONVERT(a5.Clave USING utf8mb3)
+            WHERE (
+                LOWER(p.Clave) LIKE ? 
+                OR LOWER(p.Descripcion) LIKE ? 
+                OR LOWER(p.CB) LIKE ? 
+                OR LOWER(p.ClavePro) LIKE ?
+                -- BÚSQUEDA EN CÓDIGOS ADICIONALES
+                OR EXISTS (
+                    SELECT 1 FROM codad ca 
+                    WHERE CONVERT(ca.Clave USING utf8mb3) = p.Clave 
+                    AND LOWER(ca.CB) LIKE ?
+                )
+            )
+            GROUP BY p.Id 
+            ORDER BY p.Id DESC 
+            LIMIT ? OFFSET ?`;
+
+        // Pasamos 5 veces la variable 'q'
+        const [results] = await db.execute(query, [q, q, q, q, q, limit, offset]);
+        res.json(results);
+    } catch (e) { 
+        console.error("Error en Inventario Admin Completo:", e.message);
+        res.status(500).json({ error: e.message }); 
+    }
+});
+
 app.post('/api/abmc/producto/:clave', async (req, res) => {
     const b = req.body; 
     const costo = parseFloat(b.PCosto) || 0; 
@@ -628,7 +715,17 @@ app.get('/api/siguiente-cb', async (req, res) => {
 
 app.post('/api/cliente/registrar', async (req, res) => {
     // Recibimos los datos desde Flutter
-    const { nombreCompleto, email, password, telefono, direccion, colonia, cp, ciudad, estado } = req.body;
+    const { 
+        nombreCompleto = '', 
+        email = '', 
+        password = '', 
+        telefono = '', 
+        direccion = '', 
+        colonia = '', 
+        cp = '', 
+        ciudad = '', 
+        estado = '' 
+    } = req.body;
 
     try {
         // 1. Validar que los datos mínimos existan (Email ya no es obligatorio aquí)

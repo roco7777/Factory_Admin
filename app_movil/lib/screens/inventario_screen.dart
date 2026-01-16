@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 // --- IMPORTACIONES CORREGIDAS ---
 import '../core/constants.dart';
@@ -32,11 +33,21 @@ class _PantallaInventarioState extends State<PantallaInventario> {
   bool cargando = false;
   final TextEditingController buscadorController = TextEditingController();
   List<String> sucursalNames = ["Alm 1", "Alm 2", "Alm 3", "Alm 4", "Alm 5"];
+  final AudioPlayer _audioPlayer = AudioPlayer();
 
   @override
   void initState() {
     super.initState();
     fetchSucursalNames();
+  }
+
+  // --- FUNCIÓN PARA EL SONIDO ---
+  Future<void> _reproducirBip() async {
+    try {
+      await _audioPlayer.play(AssetSource('sounds/beep.mp3'));
+    } catch (e) {
+      debugPrint("Error al reproducir sonido: $e");
+    }
   }
 
   Future<void> fetchSucursalNames() async {
@@ -64,15 +75,31 @@ class _PantallaInventarioState extends State<PantallaInventario> {
     String query = buscadorController.text.trim();
     if (query.isEmpty) return;
     setState(() => cargando = true);
+
     try {
       final response = await http.get(
-        Uri.parse('${widget.baseUrl}/api/inventario?q=$query'),
+        Uri.parse('${widget.baseUrl}/api/admin/inventario?q=$query'),
       );
+
       if (response.statusCode == 200) {
-        setState(() => productos = json.decode(response.body));
+        // 1. Decodificamos la respuesta en una variable local llamada 'lista'
+        final List<dynamic> lista = json.decode(response.body);
+
+        setState(() {
+          productos = lista;
+        });
+        buscadorController.clear();
+        // 2. Imprimimos usando la variable correcta para debug
+        if (lista.isNotEmpty) {
+          _reproducirBip(); // Suena el bip
+          buscadorController.clear(); // Limpia el buscador
+          debugPrint("DEBUG PRODUCTO OK: ${lista[0]['Clave']}");
+        }
       }
+    } catch (e) {
+      debugPrint("Error en búsqueda: $e");
     } finally {
-      setState(() => cargando = false);
+      if (mounted) setState(() => cargando = false);
     }
   }
 
@@ -233,7 +260,7 @@ class _PantallaInventarioState extends State<PantallaInventario> {
                           context,
                           MaterialPageRoute(
                             builder: (context) => EdicionProductoScreen(
-                              clave: item['Clave'].toString(),
+                              clave: item['Clave'].toString().trim(),
                               baseUrl: widget.baseUrl,
                               userRole: widget.userRole,
                               sucursalNames: sucursalNames,

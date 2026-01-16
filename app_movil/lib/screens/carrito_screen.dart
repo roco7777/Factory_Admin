@@ -50,6 +50,7 @@ class _CarritoScreenState extends State<CarritoScreen> {
   Future<void> _actualizarCantidad(dynamic item, int nuevaCantidad) async {
     if (nuevaCantidad < 1) return;
 
+    // Lógica de escalonamiento de precios
     double p1 =
         double.tryParse(
           item['Precio1']?.toString() ?? item['p_price'].toString(),
@@ -104,14 +105,11 @@ class _CarritoScreenState extends State<CarritoScreen> {
     return total;
   }
 
-  // 1. PRIMERO VERIFICAMOS SI ESTÁ LOGUEADO
   Future<void> _verificarLoginYConfirmar() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
-    // Cambiamos a String porque así lo guardamos en el login nuevo
     String? clienteId = prefs.getString('cliente_id');
 
     if (clienteId == null) {
-      // Si no hay sesión, mandamos a loguearse
       if (!mounted) return;
       await Navigator.push(
         context,
@@ -119,14 +117,12 @@ class _CarritoScreenState extends State<CarritoScreen> {
           builder: (context) => LoginScreen(baseUrl: widget.baseUrl),
         ),
       );
-      _obtenerCarrito(); // Refrescamos al volver
+      _obtenerCarrito();
     } else {
-      // Si ya tiene sesión, preguntamos si está seguro de enviar
       _confirmarEnvioPedido();
     }
   }
 
-  // 2. DIÁLOGO DE SEGURIDAD PARA EVITAR ENVÍOS POR ERROR
   void _confirmarEnvioPedido() {
     showDialog(
       context: context,
@@ -134,23 +130,18 @@ class _CarritoScreenState extends State<CarritoScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
         title: const Text("¿Confirmar Pedido?"),
         content: const Text(
-          "Se generará tu cotización y se abrirá WhatsApp para enviarla a Factory Mayoreo.",
+          "Se generará tu cotización y se enviará por WhatsApp.",
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text("REVISAR MÁS"),
+            child: const Text("REVISAR"),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
             onPressed: () {
               Navigator.pop(context);
-              _finalizarPedido(); // Llamamos a la función real de envío
+              _finalizarPedido();
             },
             child: const Text(
               "SÍ, ENVIAR",
@@ -162,7 +153,6 @@ class _CarritoScreenState extends State<CarritoScreen> {
     );
   }
 
-  // 3. PROCESO FINAL: API + WHATSAPP
   Future<void> _finalizarPedido() async {
     setState(() => cargando = true);
     SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -183,11 +173,10 @@ class _CarritoScreenState extends State<CarritoScreen> {
         }),
       );
 
-      if (res.statusCode == 200) {
-        final data = json.decode(res.body);
-        String invoiceNo = data['invoice_no'].toString();
+      final data = json.decode(res.body);
 
-        // CONSTRUIMOS UN MENSAJE DETALLADO PARA WHATSAPP
+      if (res.statusCode == 200) {
+        String invoiceNo = data['invoice_no'].toString();
         String listaProductos = "";
         for (var i in items) {
           listaProductos += "• ${i['qty']} pz - ${i['Descripcion']}\n";
@@ -200,14 +189,13 @@ class _CarritoScreenState extends State<CarritoScreen> {
             "----------------------------------\n"
             "$listaProductos"
             "----------------------------------\n"
-            "💰 *TOTAL ESTIMADO:* ${formatCurrency(_calcularTotal())}\n\n"
-            "Favor de confirmar existencias.";
+            "💰 *TOTAL:* ${formatCurrency(_calcularTotal())}";
 
-        // REEMPLAZA CON EL NÚMERO REAL (incluye código de país sin el +)
         await _abrirWhatsApp("521XXXXXXXXXX", mensaje);
-
         setState(() => items = []);
         _mostrarExito();
+      } else if (data['error'] == "SIN_STOCK") {
+        _mostrarAlertaSinStock(data['message']);
       }
     } catch (e) {
       debugPrint("Error al finalizar: $e");
@@ -216,20 +204,106 @@ class _CarritoScreenState extends State<CarritoScreen> {
     }
   }
 
+  void _mostrarAlertaSinStock(String mensaje) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.orange),
+            SizedBox(width: 10),
+            Text("¡Sin Existencia!"),
+          ],
+        ),
+        content: Text(mensaje),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _obtenerCarrito();
+            },
+            child: const Text("ACTUALIZAR CARRITO"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmarVaciarCarrito() async {
+    // 1. Mostrar el candado de confirmación
+    bool? confirmar = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red),
+            SizedBox(width: 10),
+            Text("¿Vaciar Carrito?"),
+          ],
+        ),
+        content: const Text(
+          "¿Estás seguro de que deseas eliminar todos los productos de tu pedido? Esta acción no se puede deshacer.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("CANCELAR", style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text(
+              "VACIAR AHORA",
+              style: TextStyle(color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    // 2. Si el usuario dijo que sí, ejecutamos la limpieza
+    if (confirmar == true) {
+      setState(() => cargando = true);
+      try {
+        final res = await http.post(
+          Uri.parse('${widget.baseUrl}/api/carrito/vaciar'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({'ip_add': 'APP_USER'}),
+        );
+
+        if (res.statusCode == 200) {
+          setState(() {
+            items = []; // Limpiamos la lista local
+          });
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Carrito vaciado correctamente"),
+              backgroundColor: Colors.blueGrey,
+            ),
+          );
+        }
+      } catch (e) {
+        debugPrint("Error al vaciar: $e");
+      } finally {
+        setState(() => cargando = false);
+      }
+    }
+  }
+
   Future<void> _abrirWhatsApp(String telefono, String mensaje) async {
     final telLimpio = telefono.replaceAll(RegExp(r'[^0-9]'), '');
     final whatsappUri = Uri.parse(
       "https://wa.me/$telLimpio?text=${Uri.encodeComponent(mensaje)}",
     );
-
-    try {
-      if (await canLaunchUrl(whatsappUri)) {
-        await launchUrl(whatsappUri, mode: LaunchMode.externalApplication);
-      } else {
-        await launchUrl(whatsappUri, mode: LaunchMode.platformDefault);
-      }
-    } catch (e) {
-      debugPrint("Error WhatsApp: $e");
+    if (await canLaunchUrl(whatsappUri)) {
+      await launchUrl(whatsappUri, mode: LaunchMode.externalApplication);
     }
   }
 
@@ -239,14 +313,12 @@ class _CarritoScreenState extends State<CarritoScreen> {
       barrierDismissible: false,
       builder: (context) => AlertDialog(
         title: const Icon(Icons.check_circle, color: Colors.green, size: 50),
-        content: const Text(
-          "¡Pedido procesado!\nSe ha enviado el resumen a la tienda.",
-        ),
+        content: const Text("¡Pedido procesado!\nSe ha enviado el resumen."),
         actions: [
           TextButton(
             onPressed: () {
-              Navigator.pop(context); // Cerrar diálogo
-              Navigator.pop(context); // Regresar a la tienda
+              Navigator.pop(context);
+              Navigator.pop(context);
             },
             child: const Text("Aceptar"),
           ),
@@ -259,12 +331,12 @@ class _CarritoScreenState extends State<CarritoScreen> {
     return GestureDetector(
       onTap: accion,
       child: Container(
-        padding: const EdgeInsets.all(4),
+        padding: const EdgeInsets.all(6),
         decoration: BoxDecoration(
           color: Colors.grey[200],
-          borderRadius: BorderRadius.circular(5),
+          borderRadius: BorderRadius.circular(8),
         ),
-        child: Icon(icono, size: 20),
+        child: Icon(icono, size: 18, color: Colors.black87),
       ),
     );
   }
@@ -274,13 +346,31 @@ class _CarritoScreenState extends State<CarritoScreen> {
     return Scaffold(
       backgroundColor: Colors.grey[100],
       appBar: AppBar(
-        title: const Text("Mi Carrito"),
+        title: const Text(
+          "Mi Carrito",
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         backgroundColor: const Color(0xFFD32F2F),
+        elevation: 0,
+        actions: [
+          if (items.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.delete_sweep, size: 28),
+              tooltip: "Vaciar todo el carrito",
+              onPressed:
+                  _confirmarVaciarCarrito, // Llamamos a la función de abajo
+            ),
+        ],
       ),
       body: cargando
           ? const Center(child: CircularProgressIndicator())
           : items.isEmpty
-          ? const Center(child: Text("Tu carrito está vacío"))
+          ? const Center(
+              child: Text(
+                "Tu carrito está vacío",
+                style: TextStyle(fontSize: 16),
+              ),
+            )
           : Column(
               children: [
                 Container(
@@ -289,15 +379,13 @@ class _CarritoScreenState extends State<CarritoScreen> {
                   color: Colors.amber[50],
                   child: Row(
                     children: [
-                      const Icon(Icons.store, color: Colors.orange),
+                      const Icon(Icons.store, color: Colors.orange, size: 20),
                       const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          "Almacén: $nombreSucursal",
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
+                      Text(
+                        "Surtido desde: $nombreSucursal",
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
                         ),
                       ),
                     ],
@@ -309,72 +397,135 @@ class _CarritoScreenState extends State<CarritoScreen> {
                     itemBuilder: (context, index) {
                       final item = items[index];
                       int qty = int.tryParse(item['qty'].toString()) ?? 1;
+                      double precio =
+                          double.tryParse(item['p_price'].toString()) ?? 0;
+
                       return Card(
                         margin: const EdgeInsets.symmetric(
                           horizontal: 10,
                           vertical: 5,
                         ),
-                        child: ListTile(
-                          leading: Image.network(
-                            '${widget.baseUrl}/uploads/${item['Foto']}',
-                            width: 50,
-                            errorBuilder: (c, e, s) => const Icon(Icons.image),
-                          ),
-                          title: Text(
-                            item['Descripcion'],
-                            style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.all(10),
+                          child: Row(
                             children: [
-                              Text("Unit: ${formatCurrency(item['p_price'])}"),
-                              const SizedBox(height: 5),
-                              Row(
-                                children: [
-                                  _botonCant(
-                                    Icons.remove,
-                                    () => _actualizarCantidad(item, qty - 1),
-                                  ),
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                    ),
-                                    child: Text(
-                                      "$qty",
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
+                              // IMAGEN CON ZOOM
+                              GestureDetector(
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => VerImagenPage(
+                                        url:
+                                            '${widget.baseUrl}/uploads/${item['Foto']}',
                                       ),
                                     ),
+                                  );
+                                },
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.network(
+                                    '${widget.baseUrl}/uploads/${item['Foto']}',
+                                    width: 70,
+                                    height: 70,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (c, e, s) =>
+                                        const Icon(Icons.image, size: 70),
                                   ),
-                                  _botonCant(
-                                    Icons.add,
-                                    () => _actualizarCantidad(item, qty + 1),
-                                  ),
-                                ],
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              // DETALLES
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      item['Descripcion'],
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      "Precio: ${formatCurrency(precio)}",
+                                      style: TextStyle(
+                                        color: Colors.grey[700],
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      children: [
+                                        _botonCant(
+                                          Icons.remove,
+                                          () => _actualizarCantidad(
+                                            item,
+                                            qty - 1,
+                                          ),
+                                        ),
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 15,
+                                          ),
+                                          child: Text(
+                                            "$qty",
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ),
+                                        _botonCant(
+                                          Icons.add,
+                                          () => _actualizarCantidad(
+                                            item,
+                                            qty + 1,
+                                          ),
+                                        ),
+                                        const Spacer(),
+                                        Text(
+                                          formatCurrency(precio * qty),
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            color: Color(0xFFD32F2F),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.delete_outline,
+                                  color: Colors.grey,
+                                ),
+                                onPressed: () => _eliminarItem(item['p_id']),
                               ),
                             ],
-                          ),
-                          trailing: IconButton(
-                            icon: const Icon(
-                              Icons.delete_outline,
-                              color: Colors.red,
-                            ),
-                            onPressed: () => _eliminarItem(item['p_id']),
                           ),
                         ),
                       );
                     },
                   ),
                 ),
+                // RESUMEN Y BOTÓN FIJO
                 Container(
                   padding: const EdgeInsets.all(20),
                   decoration: const BoxDecoration(
                     color: Colors.white,
                     boxShadow: [
-                      BoxShadow(color: Colors.black12, blurRadius: 10),
+                      BoxShadow(
+                        color: Colors.black12,
+                        blurRadius: 10,
+                        offset: Offset(0, -5),
+                      ),
                     ],
                   ),
                   child: Column(
@@ -384,12 +535,15 @@ class _CarritoScreenState extends State<CarritoScreen> {
                         children: [
                           const Text(
                             "TOTAL ESTIMADO:",
-                            style: TextStyle(fontWeight: FontWeight.bold),
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
                           ),
                           Text(
                             formatCurrency(_calcularTotal()),
                             style: const TextStyle(
-                              fontSize: 20,
+                              fontSize: 22,
                               fontWeight: FontWeight.bold,
                               color: Color(0xFFD32F2F),
                             ),
@@ -403,6 +557,9 @@ class _CarritoScreenState extends State<CarritoScreen> {
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFFD32F2F),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
                           ),
                           onPressed: _verificarLoginYConfirmar,
                           child: const Text(
@@ -410,6 +567,7 @@ class _CarritoScreenState extends State<CarritoScreen> {
                             style: TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.bold,
+                              fontSize: 16,
                             ),
                           ),
                         ),
@@ -419,6 +577,40 @@ class _CarritoScreenState extends State<CarritoScreen> {
                 ),
               ],
             ),
+    );
+  }
+}
+
+// PÁGINA PARA VER IMAGEN EN GRANDE
+class VerImagenPage extends StatelessWidget {
+  final String url;
+  const VerImagenPage({super.key, required this.url});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        elevation: 0,
+      ),
+      body: Center(
+        child: InteractiveViewer(
+          clipBehavior: Clip.none,
+          maxScale: 5.0,
+          child: Image.network(
+            url,
+            fit: BoxFit.contain,
+            loadingBuilder: (context, child, loadingProgress) {
+              if (loadingProgress == null) return child;
+              return const CircularProgressIndicator(color: Colors.white);
+            },
+            errorBuilder: (c, e, s) =>
+                const Icon(Icons.broken_image, color: Colors.white, size: 50),
+          ),
+        ),
+      ),
     );
   }
 }
