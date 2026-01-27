@@ -3,34 +3,52 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'core/constants.dart';
 import 'screens/inventario_screen.dart';
 import 'screens/tienda_screen.dart';
+import 'package:app_movil/services/tienda_service.dart'; //
 
 void main() async {
+  // 1. Inicialización necesaria para usar SharedPreferences antes del runApp
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const MiNegocioApp());
+
+  // 2. Leemos la URL guardada en la memoria del teléfono
+  final prefs = await SharedPreferences.getInstance();
+
+  // 3. Prioridad:
+  //    Primero busca la URL manual.
+  //    Si no existe, usa la que tengas en AppConfig.baseUrl (tu constante de respaldo).
+  String? savedUrl = prefs.getString('custom_api_url');
+  String finalUrl = savedUrl ?? AppConfig.baseUrl;
+
+  // 4. Arrancamos pasando la URL definitiva
+  runApp(MiNegocioApp(baseUrl: finalUrl));
 }
 
 class MiNegocioApp extends StatelessWidget {
-  const MiNegocioApp({super.key});
+  final String baseUrl;
+
+  // Recibimos la baseUrl dinámica
+  const MiNegocioApp({super.key, required this.baseUrl});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      //showPerformanceOverlay: true, //SIRVE PARA ACTIVAR LAS BARRAS DE RENDIMIENTO EN PANTALLA
       title: 'Factory Mayoreo',
       theme: ThemeData(
         primarySwatch: Colors.red,
         useMaterial3: false,
         primaryColor: const Color(0xFFD32F2F),
       ),
-      // El RootHandler es el que decide si mostrar Tienda o Inventario
-      home: const RootHandler(),
+      // Pasamos la URL al RootHandler
+      home: RootHandler(baseUrl: baseUrl),
     );
   }
 }
 
 class RootHandler extends StatefulWidget {
-  const RootHandler({super.key});
+  final String baseUrl;
+
+  // Recibimos la baseUrl aquí también
+  const RootHandler({super.key, required this.baseUrl});
 
   @override
   State<RootHandler> createState() => _RootHandlerState();
@@ -45,28 +63,39 @@ class _RootHandlerState extends State<RootHandler> {
 
   Future<void> _decidirRuta() async {
     final prefs = await SharedPreferences.getInstance();
+
+    // 1. Intentamos actualizar la URL desde la base de datos
+    // Usamos la URL que ya traemos para preguntar si hay una nueva
+    String? urlNueva = await TiendaService.obtenerUrlRemota(widget.baseUrl);
+
+    String urlFinal = widget.baseUrl;
+
+    if (urlNueva != null && urlNueva != widget.baseUrl) {
+      // Si la DB dice que la URL cambió, la guardamos y actualizamos
+      await prefs.setString('custom_api_url', urlNueva);
+      urlFinal = urlNueva;
+      debugPrint("--- URL AUTO-ACTUALIZADA: $urlFinal ---");
+    }
+
     final String? adminUser = prefs.getString('saved_user');
     final String? adminRol = prefs.getString('saved_rol');
 
     if (!mounted) return;
 
-    // Si ya hay sesión administrativa, vamos al inventario directamente
+    // 2. Navegamos usando la urlFinal (que puede ser la misma o la nueva)
     if (adminUser != null && adminRol != null) {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (context) => PantallaInventario(
-            userRole: adminRol,
-            baseUrl: AppConfig.baseUrl,
-          ),
+          builder: (context) =>
+              PantallaInventario(userRole: adminRol, baseUrl: urlFinal),
         ),
       );
     } else {
-      // Por defecto siempre la Tienda
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
-          builder: (context) => TiendaScreen(baseUrl: AppConfig.baseUrl),
+          builder: (context) => TiendaScreen(baseUrl: urlFinal),
         ),
       );
     }
@@ -74,6 +103,7 @@ class _RootHandlerState extends State<RootHandler> {
 
   @override
   Widget build(BuildContext context) {
+    // Pantalla de carga mientras se decide la ruta
     return const Scaffold(
       body: Center(child: CircularProgressIndicator(color: Color(0xFFD32F2F))),
     );

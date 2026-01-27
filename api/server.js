@@ -82,6 +82,20 @@ app.get('/api/producto/stock-actual', async (req, res) => {
     }
 });
 
+app.get('/api/config/api_url', async (req, res) => {
+    try {
+        const [rows] = await db.execute(
+            "SELECT valor FROM app_config WHERE clave = 'api_url' LIMIT 1"
+        );
+        if (rows.length > 0) {
+            res.json(rows[0]);
+        } else {
+            res.status(404).json({ error: "No configurado" });
+        }
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
 
 app.post('/api/producto/upload-foto', upload.single('foto'), async (req, res) => {
     const { clave } = req.body;
@@ -292,16 +306,10 @@ app.get('/api/siguiente-clave', async (req, res) => {
 });
 
 app.get('/api/sucursales', async (req, res) => { 
-    // Si viene el parámetro ?soloApp=true, filtramos. Si no, enviamos todo.
     const soloApp = req.query.soloApp === 'true';
-    
     try { 
-        let sql = 'SELECT ID, sucursal, InfoEnvio, AppVisible FROM Empresa';
-        
-        if (soloApp) {
-            sql += ' WHERE AppVisible = 1';
-        }
-        
+        let sql = 'SELECT ID, sucursal, InfoEnvio, AppVisible, Pedidos FROM Empresa';
+        if (soloApp) sql += ' WHERE AppVisible = 1';
         sql += ' ORDER BY ID';
         
         const [results] = await db.execute(sql); 
@@ -390,11 +398,13 @@ app.get('/api/carrito', async (req, res) => {
         const sqlFinal = `
             SELECT c.*, p.Descripcion, p.Foto, p.Clave, p.Precio1, p.Precio2, p.Precio3, p.Min1, p.Min2, p.Min3,
             a.ExisPVentas as stock_disponible,
-            e.Sucursal as NombreSucursal -- <--- AHORA SÍ TRAEMOS EL NOMBRE
+            e.Sucursal as NombreSucursal,
+            e.Pedidos as permite_pedidos,
+            e.mincompra as minimo_sucursal
             FROM cart c
             JOIN productos p ON c.p_id = p.Id
             LEFT JOIN alm${sucId} a ON p.Clave = a.Clave
-            LEFT JOIN Empresa e ON e.Id = c.num_suc -- <--- JOIN AGREGADO
+            LEFT JOIN Empresa e ON e.Id = c.num_suc
             WHERE c.ip_add = ?`;
 
         const [results] = await db.execute(sqlFinal, [ip_add]);
@@ -418,16 +428,40 @@ app.get('/api/carrito/contar', async (req, res) => {
 // BUSCA ESTA RUTA Y AJUSTA EL SQL:
 app.post('/api/agregar_carrito', async (req, res) => {
     const { p_id, qty, p_price, ip_add, num_suc, is_increment } = req.body;
-    const cantidadLimpia = parseInt(qty) || 1; // Si llega '', se vuelve 1
+    const cantidadLimpia = parseInt(qty) || 1; 
     const user_ip = ip_add || 'APP_USER';
     const tablaAlm = `alm${num_suc}`;
 
     try {
-        // 1. Obtener Stock y Cantidad actual en el carrito
+        // ==========================================================
+        // 1. EL "PORTERO": VALIDACIÓN DE SUCURSAL ÚNICA
+        // ==========================================================
+        // Buscamos si ya existe algún producto de otra sucursal
+        const [existingCart] = await db.execute(
+            "SELECT num_suc FROM cart WHERE ip_add = ? LIMIT 1", 
+            [user_ip]
+        );
+
+        if (existingCart.length > 0) {
+            const sucActualEnCarrito = existingCart[0].num_suc;
+            
+            // Si la sucursal del carrito es diferente a la que queremos agregar...
+            if (parseInt(sucActualEnCarrito) !== parseInt(num_suc)) {
+                return res.status(400).json({ 
+                    success: false, 
+                    error: "DIFERENTE_SUCURSAL",
+                    message: "Tu carrito ya tiene productos de otro almacén." 
+                });
+            }
+        }
+        // ==========================================================
+
+        // 2. Obtener Stock y Cantidad actual (Tu lógica original corregida)
         const [prodInfo] = await db.execute(
             `SELECT p.Clave, a.ExisPVentas FROM productos p 
              LEFT JOIN ${tablaAlm} a ON p.Clave = a.Clave WHERE p.Id = ?`, [p_id]
         );
+        
         const [cartInfo] = await db.execute(
             "SELECT qty FROM cart WHERE p_id = ? AND ip_add = ?", [p_id, user_ip]
         );
@@ -436,10 +470,9 @@ app.post('/api/agregar_carrito', async (req, res) => {
         const cantidadActual = cartInfo.length > 0 ? cartInfo[0].qty : 0;
         const stockLimpio = Math.floor(parseFloat(stockDisponible));
         
-        let nuevaCantidadFinal = is_increment ? (cantidadActual + parseInt(qty)) : parseInt(qty);
+        let nuevaCantidadFinal = is_increment ? (cantidadActual + cantidadLimpia) : cantidadLimpia;
 
         // --- BLOQUEO DE SEGURIDAD PARA MÍNIMOS ---
-        // Si la nueva cantidad es menor a 1, detenemos el proceso
         if (nuevaCantidadFinal < 1) {
             return res.status(400).json({
                 success: false,
@@ -449,7 +482,6 @@ app.post('/api/agregar_carrito', async (req, res) => {
         }
 
         // --- VALIDACIÓN DE STOCK ---
-        // Solo validamos stock si el usuario está aumentando la cantidad
         if (nuevaCantidadFinal > cantidadActual) {
             if (nuevaCantidadFinal > stockDisponible) {
                 return res.status(400).json({ 
@@ -460,6 +492,7 @@ app.post('/api/agregar_carrito', async (req, res) => {
             }
         }
 
+        // 3. Guardar o Actualizar en MariaDB
         if (cartInfo.length > 0) {
             await db.execute(
                 "UPDATE cart SET qty = ?, p_price = ?, num_suc = ? WHERE p_id = ? AND ip_add = ?",
@@ -471,8 +504,11 @@ app.post('/api/agregar_carrito', async (req, res) => {
                 [p_id, user_ip, nuevaCantidadFinal, p_price, num_suc]
             );
         }
+        
         res.json({ success: true });
+
     } catch (e) {
+        console.error("Error en agregar_carrito:", e.message);
         res.status(500).json({ error: e.message });
     }
 });
@@ -838,7 +874,6 @@ app.get('/api/siguiente-cb', async (req, res) => {
 app.post('/api/cliente/registrar', async (req, res) => {
     // Recibimos los datos desde Flutter
     const { 
-        claveTelefono,
         nombreCompleto = '', 
         email = '', 
         password = '', 

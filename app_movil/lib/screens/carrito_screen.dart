@@ -25,6 +25,9 @@ class _CarritoScreenState extends State<CarritoScreen> {
   bool cargando = true;
   String nombreSucursal = "Cargando...";
 
+  bool permitePedidos = true;
+  double minCompra = 0;
+
   int _obtenerMultiplo(dynamic item) {
     int m1 = (double.tryParse(item['Min1']?.toString() ?? '0') ?? 0).toInt();
     // Si min1 es 0 o 1, el múltiplo es 1 (venta libre). Si es > 1, ese es el múltiplo.
@@ -66,6 +69,17 @@ class _CarritoScreenState extends State<CarritoScreen> {
           if (items.isNotEmpty) {
             nombreSucursal =
                 items[0]['NombreSucursal'] ?? "Sucursal Seleccionada";
+            // --- NUEVA LÓGICA DE CAPTURA ---
+            permitePedidos =
+                (int.tryParse(items[0]['permite_pedidos']?.toString() ?? '1') ??
+                    1) ==
+                1;
+            minCompra =
+                double.tryParse(
+                  items[0]['minimo_sucursal']?.toString() ?? '0',
+                ) ??
+                0;
+            // ------------------------------
           }
         });
       }
@@ -122,7 +136,22 @@ class _CarritoScreenState extends State<CarritoScreen> {
   // --- NUEVA LÓGICA DE VERIFICACIÓN (BOTÓN ROJO) ---
 
   void _verificarYContinuar() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String clienteId = prefs.getString('cliente_id') ?? "";
+
+    if (clienteId.isEmpty) {
+      if (!mounted) return;
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => LoginScreen(baseUrl: widget.baseUrl),
+        ),
+      ).then((_) => _obtenerCarrito());
+      return;
+    }
+
     if (items.isEmpty) return;
+
     setState(() {
       cargando = true;
       erroresStock.clear();
@@ -136,22 +165,40 @@ class _CarritoScreenState extends State<CarritoScreen> {
         items,
         sucId,
       );
+
       setState(() => cargando = false);
 
       if (respuesta['status'] == 'ok') {
-        _verificarLoginYProceder();
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ConfirmacionPedidoScreen(
+              baseUrl: widget.baseUrl,
+              onConfirmar: _finalizarPedido,
+            ),
+          ),
+        );
       } else {
+        // --- AQUÍ ESTÁ EL ARREGLO ---
         setState(() {
           for (var error in respuesta['detalles']) {
+            // Buscamos el item en nuestra lista local
             final item = items.firstWhere(
               (i) => i['Descripcion'] == error['nombre'],
             );
+
+            // 1. Guardamos el error para que la tarjeta sepa que debe pintar
             erroresStock[item['p_id']] = error;
+
+            // 2. ¡VITAL! Actualizamos el stock local con lo que dijo el servidor
+            // Sin esta línea, la UI no sabe que qty > stock y no cambia de color
+            item['stock_disponible'] = error['disponible'];
           }
         });
+
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text("Ajusta los productos en rojo"),
+            content: Text("Ajusta los productos en rojo o naranja"),
             backgroundColor: Colors.red,
           ),
         );
@@ -411,33 +458,6 @@ class _CarritoScreenState extends State<CarritoScreen> {
     }
   }
 
-  Future<void> _verificarLoginYProceder() async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-    String clienteId = prefs.get('cliente_id')?.toString() ?? "";
-
-    if (clienteId.isEmpty) {
-      await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => LoginScreen(baseUrl: widget.baseUrl),
-        ),
-      );
-      _obtenerCarrito();
-    } else {
-      if (!mounted) return;
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ConfirmacionPedidoScreen(
-            baseUrl: widget.baseUrl,
-            onConfirmar:
-                _finalizarPedido, // Corregido: Llamamos a finalizar directamente
-          ),
-        ),
-      );
-    }
-  }
-
   Future<void> _finalizarPedido() async {
     // Aquí va tu lógica original de guardado en DB y envío de WhatsApp
     debugPrint("Procesando pedido final...");
@@ -494,6 +514,8 @@ class _CarritoScreenState extends State<CarritoScreen> {
                   ),
                   _ResumenCompra(
                     total: _calcularTotal(),
+                    minCompra: minCompra, // <--- Agregar
+                    permitePedidos: permitePedidos, // <--- Agregar
                     onPressed: _verificarYContinuar,
                   ),
                 ],
@@ -563,7 +585,9 @@ class _TarjetaProducto extends StatelessWidget {
     bool mostrarError = error != null && qty > stockDisponible && !esAgotado;
 
     return Opacity(
-      opacity: esAgotado ? 0.5 : 1.0,
+      opacity: esAgotado
+          ? 0.6
+          : 1.0, // Un poco menos traslúcido para que sea legible
       child: Card(
         margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         color: esAgotado
@@ -581,141 +605,160 @@ class _TarjetaProducto extends StatelessWidget {
         ),
         child: Padding(
           padding: const EdgeInsets.all(10),
-          child: Column(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Row(
-                children: [
-                  IgnorePointer(
-                    ignoring: esAgotado,
-                    child: GestureDetector(
-                      onTap: () => onShowFicha(item),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.network(
-                          '$baseUrl/uploads/${item['Foto']}',
-                          width: 75,
-                          height: 75,
-                          fit: BoxFit.cover,
-                          errorBuilder: (c, e, s) =>
-                              const Icon(Icons.image, size: 75),
-                        ),
+              // Imagen del producto
+              IgnorePointer(
+                ignoring: esAgotado,
+                child: GestureDetector(
+                  onTap: () => onShowFicha(item),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.network(
+                      '$baseUrl/uploads/${item['Foto']}',
+                      width: 75,
+                      height: 75,
+                      fit: BoxFit.cover,
+                      errorBuilder: (c, e, s) =>
+                          const Icon(Icons.image, size: 75),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+
+              // Información del producto
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      item['Descripcion'],
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        color: esAgotado ? Colors.grey[700] : Colors.black87,
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          item['Descripcion'],
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
+
+                    // Mensaje de Advertencia (Naranja - Stock Insuficiente)
+                    if (mostrarError)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          "Stock disponible: $stockDisponible",
+                          style: const TextStyle(
+                            color: Colors.orange,
                             fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                            color: esAgotado ? Colors.grey : Colors.black87,
+                            fontSize: 11,
                           ),
                         ),
+                      ),
 
-                        // TEXTO PULIDO
-                        if (mostrarError)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 4),
-                            child: Text(
-                              "Stock disponible: $stockDisponible",
-                              style: const TextStyle(
-                                color: Colors.orange,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 11,
-                              ),
-                            ),
+                    // Mensaje Critico (Rojo - Agotado)
+                    if (esAgotado)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 4),
+                        child: Text(
+                          "PRODUCTO AGOTADO EN ESTE ALMACÉN",
+                          style: TextStyle(
+                            color: Colors.red,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 10,
                           ),
+                        ),
+                      ),
 
-                        if (esAgotado)
-                          const Text(
-                            "PRODUCTO AGOTADO",
-                            style: TextStyle(
-                              color: Colors.red,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 11,
-                            ),
+                    const SizedBox(height: 10),
+
+                    // Fila de Precios y Cantidad
+                    Row(
+                      children: [
+                        Text(
+                          "\$${precio.toStringAsFixed(2)}",
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
                           ),
+                        ),
+                        const Text(" x ", style: TextStyle(color: Colors.grey)),
 
-                        const SizedBox(height: 10),
-
-                        if (!esAgotado)
-                          Row(
-                            children: [
-                              Text(
-                                "\$${precio.toStringAsFixed(2)}",
-                                style: const TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const Text(
-                                " x ",
-                                style: TextStyle(color: Colors.grey),
-                              ),
-                              InkWell(
-                                onTap: () => onSelectQty(item),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    border: Border.all(
-                                      color: mostrarError
+                        // Selector de Cantidad
+                        InkWell(
+                          // Si está agotado, el botón no reacciona
+                          onTap: esAgotado ? null : () => onSelectQty(item),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                color: esAgotado
+                                    ? Colors.red[200]!
+                                    : (mostrarError
                                           ? Colors.orange
-                                          : Colors.grey[300]!,
-                                    ),
-                                    borderRadius: BorderRadius.circular(6),
-                                    color: mostrarError
+                                          : Colors.grey[300]!),
+                              ),
+                              borderRadius: BorderRadius.circular(6),
+                              color: esAgotado
+                                  ? Colors.red[50]
+                                  : (mostrarError
                                         ? Colors.orange[100]
-                                        : Colors.grey[50],
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Text(
-                                        "$qty",
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                      const Icon(
-                                        Icons.arrow_drop_down,
-                                        size: 18,
-                                      ),
-                                    ],
+                                        : Colors.grey[50]),
+                            ),
+                            child: Row(
+                              children: [
+                                Text(
+                                  "$qty",
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: esAgotado
+                                        ? Colors.red
+                                        : Colors.black,
                                   ),
                                 ),
-                              ),
-                              const Spacer(),
-                              Text(
-                                "\$${(precio * qty).toStringAsFixed(2)}",
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 15,
-                                  color: Color(0xFFD32F2F),
-                                ),
-                              ),
-                            ],
+                                // Solo mostramos la flecha si NO está agotado
+                                if (!esAgotado)
+                                  const Icon(Icons.arrow_drop_down, size: 18),
+                              ],
+                            ),
                           ),
+                        ),
+                        const Spacer(),
+
+                        // Subtotal del Item
+                        Text(
+                          "\$${(precio * qty).toStringAsFixed(2)}",
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 15,
+                            color: esAgotado
+                                ? Colors.grey
+                                : const Color(0xFFD32F2F),
+                            // Si está agotado, tachamos el precio para indicar que no suma
+                            decoration: esAgotado
+                                ? TextDecoration.lineThrough
+                                : null,
+                          ),
+                        ),
                       ],
                     ),
-                  ),
-                  // Solo botón de eliminar
-                  IconButton(
-                    icon: const Icon(
-                      Icons.delete_outline,
-                      color: Colors.red,
-                      size: 24,
-                    ),
-                    onPressed: () => onDelete(item['p_id']),
-                  ),
-                ],
+                  ],
+                ),
+              ),
+
+              // Botón eliminar
+              IconButton(
+                icon: const Icon(
+                  Icons.delete_outline,
+                  color: Colors.red,
+                  size: 24,
+                ),
+                onPressed: () => onDelete(item['p_id']),
               ),
             ],
           ),
@@ -728,23 +771,36 @@ class _TarjetaProducto extends StatelessWidget {
 // 3. Resumen Final de Compra (Total y Botón)
 class _ResumenCompra extends StatelessWidget {
   final double total;
+  final double minCompra;
+  final bool permitePedidos;
   final VoidCallback onPressed;
-  const _ResumenCompra({required this.total, required this.onPressed});
+
+  const _ResumenCompra({
+    required this.total,
+    required this.minCompra,
+    required this.permitePedidos,
+    required this.onPressed,
+  });
 
   @override
   Widget build(BuildContext context) {
+    String textoBoton = "VERIFICAR Y CONTINUAR";
+    bool habilitado = true;
+    Color colorBoton = const Color(0xFFD32F2F);
+
+    if (!permitePedidos) {
+      textoBoton = "Este almacén NO realiza envios";
+      habilitado = false;
+      colorBoton = Colors.grey;
+    } else if (total < minCompra) {
+      textoBoton = "El minimo de compra es: \$${minCompra.toStringAsFixed(0)}";
+      habilitado = false;
+      colorBoton = Colors.grey;
+    }
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, -5),
-          ),
-        ],
-      ),
+      color: Colors.white,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -753,12 +809,12 @@ class _ResumenCompra extends StatelessWidget {
             children: [
               const Text(
                 "TOTAL ESTIMADO:",
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                style: TextStyle(fontWeight: FontWeight.bold),
               ),
               Text(
                 "\$${total.toStringAsFixed(2)}",
                 style: const TextStyle(
-                  fontSize: 24,
+                  fontSize: 22,
                   fontWeight: FontWeight.bold,
                   color: Color(0xFFD32F2F),
                 ),
@@ -768,20 +824,22 @@ class _ResumenCompra extends StatelessWidget {
           const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
-            height: 52,
+            height: 50,
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFD32F2F),
-                foregroundColor: Colors.white,
-                elevation: 0,
+                backgroundColor: colorBoton,
+                disabledBackgroundColor: Colors.grey[400],
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              onPressed: onPressed,
-              child: const Text(
-                "VERIFICAR Y CONTINUAR",
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              onPressed: habilitado ? onPressed : null,
+              child: Text(
+                textoBoton,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ),

@@ -71,6 +71,38 @@ class _TiendaScreenState extends State<TiendaScreen> {
 
   // --- MÉTODOS DE DATOS Y SESIÓN ---
 
+  void _mostrarConfiguracionUrl() {
+    TextEditingController urlCtrl = TextEditingController(text: widget.baseUrl);
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Configuración de Red"),
+        content: TextField(
+          controller: urlCtrl,
+          decoration: const InputDecoration(hintText: "http://100.x.y.z:3000"),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("CANCELAR"),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setString('custom_api_url', urlCtrl.text);
+              if (mounted) {
+                Navigator.pop(context);
+                // Aquí podrías reiniciar la App o refrescar la conexión
+              }
+            },
+            child: const Text("GUARDAR Y REINICIAR"),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _cargarSesion() async {
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
@@ -127,37 +159,66 @@ class _TiendaScreenState extends State<TiendaScreen> {
 
   Future<void> _cargarSucursales() async {
     try {
+      // 1. Traemos las sucursales del servidor
       final data = await TiendaService.fetchSucursales(widget.baseUrl);
       final prefs = await SharedPreferences.getInstance();
-      int? savedId = prefs.getInt('saved_sucursal_id');
-      String? savedNombre = prefs.getString('saved_sucursal_nombre');
 
-      setState(() {
-        sucursales = data;
-        if (sucursales.isNotEmpty) {
-          if (savedId != null) {
+      // Recuperamos lo que el usuario tenía guardado
+      int? savedId = prefs.getInt('saved_sucursal_id');
+
+      debugPrint("--- DEBUG: Sucursal guardada en memoria: $savedId ---");
+      debugPrint(
+        "--- DEBUG: Sucursales recibidas del ProLiant: ${data.length} ---",
+      );
+
+      if (mounted) {
+        setState(() {
+          sucursales = data;
+
+          if (sucursales.isNotEmpty) {
+            // 2. BUSQUEDA INTELIGENTE:
+            // Intentamos buscar la sucursal guardada.
+            // Si no existe (porque ahora es invisible) o es la primera vez, tomamos la primera de la lista.
             sucursalActual = sucursales.firstWhere(
               (s) =>
                   (s['ID'] ?? s['id'] ?? s['Id']).toString() ==
                   savedId.toString(),
               orElse: () => sucursales[0],
             );
-            sucursalSeleccionada = savedId;
-            nombreSucursal = savedNombre ?? "Sucursal";
-          } else {
-            sucursalActual = sucursales[0];
+
+            // 3. ACTUALIZAMOS LOS VALORES REALES (Usando lo que dice el SERVIDOR, no la memoria)
             var rawId =
                 sucursalActual['ID'] ??
                 sucursalActual['id'] ??
                 sucursalActual['Id'];
-            sucursalSeleccionada = int.tryParse(rawId.toString()) ?? 1;
+            sucursalSeleccionada =
+                int.tryParse(rawId.toString()) ??
+                2; // ID 2 por defecto si falla
             nombreSucursal = sucursalActual['sucursal'] ?? "Sucursal";
+
+            // 4. GUARDAMOS EN MEMORIA lo que realmente quedó seleccionado
+            prefs.setInt('saved_sucursal_id', sucursalSeleccionada);
+            prefs.setString('saved_sucursal_nombre', nombreSucursal);
+
+            debugPrint(
+              "--- DEBUG: Seleccionada finalmente: $nombreSucursal (ID: $sucursalSeleccionada) ---",
+            );
           }
-        }
-      });
-      _cargarDatosIniciales();
+        });
+
+        // 5. Una vez que el setState terminó y tenemos sucursal, cargamos productos
+        _cargarDatosIniciales();
+      }
     } catch (e) {
-      debugPrint("Error sucursales: $e");
+      debugPrint("!!! ERROR CRÍTICO EN CARGA DE SUCURSALES: $e");
+      // Si falla, al menos intentamos cargar la sucursal 2 (TUXTLA) que sabemos que existe
+      if (mounted) {
+        setState(() {
+          sucursalSeleccionada = 2;
+          nombreSucursal = "TUXTLA";
+        });
+        _cargarDatosIniciales();
+      }
     }
   }
 

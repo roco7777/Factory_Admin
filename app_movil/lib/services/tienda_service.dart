@@ -29,11 +29,25 @@ class TiendaService {
 
   // 3. Obtener Sucursales (Almacenes)
   static Future<List<dynamic>> fetchSucursales(String baseUrl) async {
-    final res = await http.get(
-      Uri.parse('$baseUrl/api/sucursales?soloApp=true'),
-    );
-    if (res.statusCode == 200) return json.decode(res.body);
-    throw Exception("Error al cargar sucursales");
+    try {
+      final url = Uri.parse('$baseUrl/api/sucursales?soloApp=true');
+      debugPrint("--- Intentando conectar a: $url ---");
+
+      final res = await http.get(url).timeout(const Duration(seconds: 5));
+
+      if (res.statusCode == 200) {
+        return json.decode(res.body);
+      } else {
+        // Esto nos dirá si el servidor respondió con un error (404, 500, etc)
+        throw Exception("Servidor respondió con código: ${res.statusCode}");
+      }
+    } catch (e) {
+      // Esto nos dirá si hubo un error de red (Connection refused, timeout, etc)
+      debugPrint("Error de red en fetchSucursales: $e");
+      throw Exception(
+        "Error de conexión: Verifica que tu IP sea correcta y el ProLiant esté encendido.",
+      );
+    }
   }
 
   // 4. Contador del Carrito
@@ -106,5 +120,23 @@ class TiendaService {
       body: json.encode({'items': carrito, 'idSuc': idSuc}),
     );
     return json.decode(res.body);
+  }
+
+  //obtener url remota
+  // El error era el espacio entre 'baseUrl' y 'Actual'
+  static Future<String?> obtenerUrlRemota(String baseUrlActual) async {
+    try {
+      final res = await http
+          .get(Uri.parse('$baseUrlActual/api/config/api_url'))
+          .timeout(const Duration(seconds: 3));
+
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        return data['valor'];
+      }
+    } catch (e) {
+      debugPrint("No se pudo verificar URL remota: $e");
+    }
+    return null;
   }
 }

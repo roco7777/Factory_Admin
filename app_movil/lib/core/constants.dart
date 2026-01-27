@@ -1,6 +1,6 @@
 class AppConfig {
-  static const String baseUrl =
-      "https://erma-contributorial-sufferingly.ngrok-free.dev";
+  static const String baseUrl = "http://100.82.170.128:3000";
+  //"https://erma-contributorial-sufferingly.ngrok-free.dev";
 }
 
 String formatCurrency(dynamic valor) {

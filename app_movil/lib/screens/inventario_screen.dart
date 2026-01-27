@@ -153,13 +153,20 @@ class _PantallaInventarioState extends State<PantallaInventario> {
               title: const Text("Cerrar Sesión Admin"),
               onTap: () async {
                 final prefs = await SharedPreferences.getInstance();
+
+                // Limpiamos la sesión en el HP ProLiant
                 await prefs.remove('saved_user');
                 await prefs.remove('saved_rol');
+
                 if (!mounted) return;
-                // Regresamos al RootHandler para que decida ir a la Tienda
+
+                // 1. ELIMINAMOS 'const' porque baseUrl es dinámica
+                // 2. Pasamos widget.baseUrl para no perder la conexión
                 Navigator.pushAndRemoveUntil(
                   context,
-                  MaterialPageRoute(builder: (context) => const RootHandler()),
+                  MaterialPageRoute(
+                    builder: (context) => RootHandler(baseUrl: widget.baseUrl),
+                  ),
                   (route) => false,
                 );
               },
