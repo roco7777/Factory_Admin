@@ -91,7 +91,6 @@ class _PantallaInventarioState extends State<PantallaInventario> {
         buscadorController.clear();
         // 2. Imprimimos usando la variable correcta para debug
         if (lista.isNotEmpty) {
-          _reproducirBip(); // Suena el bip
           buscadorController.clear(); // Limpia el buscador
           debugPrint("DEBUG PRODUCTO OK: ${lista[0]['Clave']}");
         }

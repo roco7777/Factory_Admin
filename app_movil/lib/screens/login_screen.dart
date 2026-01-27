@@ -48,7 +48,7 @@ class _LoginScreenState extends State<LoginScreen> {
         final prefs = await SharedPreferences.getInstance();
 
         // Guardamos los datos del cliente
-        await prefs.setInt('cliente_id', data['cliente']['Id']);
+        await prefs.setString('cliente_id', data['cliente']['Id'].toString());
         await prefs.setString(
           'cliente_nombre',
           data['cliente']['Nombre2'] ?? "Cliente",

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'dart:convert'; // Solo se queda para manejar respuestas de error específicas
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/constants.dart';
 import 'carrito_screen.dart';
@@ -8,6 +7,10 @@ import 'inventario_screen.dart';
 import 'login_screen.dart';
 import 'admin_login_screen.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'detalle_producto_screen.dart';
+import '../widgets/product_card.dart';
+import '../widgets/tienda_modals.dart';
+import '../services/tienda_service.dart'; // NUEVO IMPORT
 
 class TiendaScreen extends StatefulWidget {
   final String baseUrl;
@@ -18,6 +21,7 @@ class TiendaScreen extends StatefulWidget {
 }
 
 class _TiendaScreenState extends State<TiendaScreen> {
+  final int sessionSeed = DateTime.now().millisecondsSinceEpoch;
   List<dynamic> productos = [];
   List<dynamic> categorias = [];
   List<dynamic> sucursales = [];
@@ -26,7 +30,6 @@ class _TiendaScreenState extends State<TiendaScreen> {
   String? rolAdmin;
 
   String nombreSucursal = "Sucursal";
-
   String categoriaSeleccionada = "TODOS";
   bool cargando = false;
   int totalItemsCarrito = 0;
@@ -39,6 +42,7 @@ class _TiendaScreenState extends State<TiendaScreen> {
 
   final TextEditingController buscadorCtrl = TextEditingController();
   final Color rojoFactory = const Color(0xFFD32F2F);
+  final AudioPlayer _audioPlayer = AudioPlayer();
 
   @override
   void initState() {
@@ -61,15 +65,17 @@ class _TiendaScreenState extends State<TiendaScreen> {
   void dispose() {
     _scrollController.dispose();
     buscadorCtrl.dispose();
+    _audioPlayer.dispose();
     super.dispose();
   }
 
-  // Carga el nombre del cliente y el rol de admin si existen
+  // --- MÉTODOS DE DATOS Y SESIÓN ---
+
   Future<void> _cargarSesion() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     setState(() {
       String nombreCompleto = prefs.getString('cliente_nombre') ?? "Invitado";
-      // Si el nombre tiene espacios, tomamos solo la primera palabra
       nombreCliente = nombreCompleto.split(' ')[0];
       rolAdmin = prefs.getString('saved_rol');
     });
@@ -80,47 +86,36 @@ class _TiendaScreenState extends State<TiendaScreen> {
     setState(() => cargando = true);
 
     try {
-      // 1. Cargamos categorías solo si están vacías para ahorrar peticiones
+      // Cargamos categorías si están vacías usando el Service
       if (categorias.isEmpty) {
-        final resCat = await http.get(Uri.parse('${widget.baseUrl}/api/tipos'));
-        if (resCat.statusCode == 200) {
-          setState(() => categorias = json.decode(resCat.body));
-        }
+        categorias = await TiendaService.fetchCategorias(widget.baseUrl);
       }
 
-      // 2. Cargamos inventario
-      // 1. AGREGA ESTA LÍNEA (Define qué vamos a buscar al inicio)
       String busqueda = categoriaSeleccionada == "TODOS"
           ? ""
           : categoriaSeleccionada;
 
-      // 2. AHORA SÍ, USA LA VARIABLE 'busqueda'
-      final response = await http.get(
-        Uri.parse(
-          '${widget.baseUrl}/api/inventario?q=$busqueda&page=0&idSuc=$sucursalSeleccionada',
-        ),
+      // Llamada al Service
+      final data = await TiendaService.fetchInventario(
+        baseUrl: widget.baseUrl,
+        query: busqueda,
+        page: 0,
+        idSuc: sucursalSeleccionada,
+        seed: sessionSeed,
       );
 
-      // ELIMINAMOS el debugPrint del body completo.
-      // Solo imprimimos el conteo para saber si funcionó.
-      if (response.statusCode == 200) {
-        List<dynamic> data = json.decode(response.body);
-        setState(() {
-          productos = data;
-          _paginaActual = 0;
-          _hayMasProductos = data.length >= 10;
-        });
+      setState(() {
+        productos = data;
+        _paginaActual = 0;
+        _hayMasProductos = data.length >= 10;
+      });
 
-        // --- TURBO DE PRE-CARGA ---
-        // El S24 Ultra tiene RAM de sobra, vamos a usarla
-        for (var prod in data) {
-          if (prod['Foto'] != null && prod['Foto'] != "") {
-            // Pre-cargamos la imagen completa en la memoria
-            precacheImage(
-              NetworkImage('${widget.baseUrl}/uploads/${prod['Foto']}'),
-              context,
-            );
-          }
+      for (var prod in data) {
+        if (prod['Foto'] != null && prod['Foto'] != "" && mounted) {
+          precacheImage(
+            NetworkImage('${widget.baseUrl}/uploads/${prod['Foto']}'),
+            context,
+          );
         }
       }
     } catch (e) {
@@ -132,103 +127,194 @@ class _TiendaScreenState extends State<TiendaScreen> {
 
   Future<void> _cargarSucursales() async {
     try {
-      final res = await http.get(
-        Uri.parse('${widget.baseUrl}/api/sucursales?soloApp=true'),
-      );
-      if (res.statusCode == 200) {
-        final data = json.decode(res.body);
+      final data = await TiendaService.fetchSucursales(widget.baseUrl);
+      final prefs = await SharedPreferences.getInstance();
+      int? savedId = prefs.getInt('saved_sucursal_id');
+      String? savedNombre = prefs.getString('saved_sucursal_nombre');
 
-        final prefs = await SharedPreferences.getInstance();
-        int? savedId = prefs.getInt('saved_sucursal_id');
-        String? savedNombre = prefs.getString('saved_sucursal_nombre');
-
-        setState(() {
-          sucursales = data;
-          if (sucursales.isNotEmpty) {
-            if (savedId != null) {
-              // Si hay una guardada, intentamos encontrarla en la lista que bajó de la API
-              sucursalActual = sucursales.firstWhere(
-                (s) =>
-                    (s['ID'] ?? s['id'] ?? s['Id']).toString() ==
-                    savedId.toString(),
-                orElse: () =>
-                    sucursales[0], // Si no la encuentra, usa la primera
-              );
-              sucursalSeleccionada = savedId;
-              nombreSucursal = savedNombre ?? "Sucursal";
-            } else {
-              // Si es la primera vez (no hay nada guardado), usa la primera por defecto
-              sucursalActual = sucursales[0];
-              var rawId =
-                  sucursalActual['ID'] ??
-                  sucursalActual['id'] ??
-                  sucursalActual['Id'];
-              sucursalSeleccionada = int.tryParse(rawId.toString()) ?? 1;
-              nombreSucursal = sucursalActual['sucursal'] ?? "Sucursal";
-            }
+      setState(() {
+        sucursales = data;
+        if (sucursales.isNotEmpty) {
+          if (savedId != null) {
+            sucursalActual = sucursales.firstWhere(
+              (s) =>
+                  (s['ID'] ?? s['id'] ?? s['Id']).toString() ==
+                  savedId.toString(),
+              orElse: () => sucursales[0],
+            );
+            sucursalSeleccionada = savedId;
+            nombreSucursal = savedNombre ?? "Sucursal";
+          } else {
+            sucursalActual = sucursales[0];
+            var rawId =
+                sucursalActual['ID'] ??
+                sucursalActual['id'] ??
+                sucursalActual['Id'];
+            sucursalSeleccionada = int.tryParse(rawId.toString()) ?? 1;
+            nombreSucursal = sucursalActual['sucursal'] ?? "Sucursal";
           }
-        });
-        _cargarDatosIniciales();
-      }
+        }
+      });
+      _cargarDatosIniciales();
     } catch (e) {
       debugPrint("Error sucursales: $e");
     }
   }
 
-  void _mostrarModalSucursales() {
-    showModalBottomSheet(
+  // --- MÉTODOS DE MODALES Y NAVEGACIÓN ---
+
+  void _mostrarSelectorCantidad(dynamic item) {
+    TiendaModals.mostrarSelectorCantidad(
       context: context,
-      backgroundColor: Colors.white,
-      // Evita que el modal sea demasiado alto en pantallas grandes como el S24 Ultra
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => Container(
-        // Limitamos la altura máxima al 70% de la pantalla para evitar cálculos infinitos
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.7,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min, // La columna solo ocupa lo necesario
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(16.0),
-              child: Text(
-                "Selecciona un Almacén",
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-              ),
-            ),
-            const Divider(height: 1),
-            // Usamos Flexible en lugar de shrinkWrap para permitir el scroll eficiente
-            Flexible(
-              child: ListView.builder(
-                shrinkWrap:
-                    false, // ¡IMPORTANTE! Desactivado para ganar fluidez
-                itemCount: sucursales.length,
-                itemBuilder: (context, i) {
-                  final suc = sucursales[i];
-                  return ListTile(
-                    leading: const Icon(Icons.store, color: Color(0xFFD32F2F)),
-                    title: Text(
-                      suc['sucursal'] ?? 'Sucursal sin nombre',
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    subtitle: const Text("Toca para ver detalles de envío"),
-                    onTap: () {
-                      Navigator.pop(context);
-                      _mostrarInfoSucursal(suc);
-                    },
-                  );
-                },
-              ),
-            ),
-            const SizedBox(height: 10),
-          ],
+      item: item,
+      rojoFactory: rojoFactory,
+      formatCurrency: (val) => formatCurrency(val),
+      onAgregar: (qty, price) {
+        _guardarEnCarrito(item['Id'], qty, price);
+      },
+    );
+  }
+
+  void _mostrarModalSucursales() {
+    TiendaModals.mostrarModalSucursales(
+      context: context,
+      sucursales: sucursales,
+      onSucursalClick: (suc) {
+        if (mounted) Navigator.pop(context);
+        _mostrarInfoSucursal(suc);
+      },
+    );
+  }
+
+  void _mostrarFichaProducto(dynamic item) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => DetalleProductoScreen(
+          item: item,
+          baseUrl: widget.baseUrl,
+          onAgregarTap: (prod) => _mostrarSelectorCantidad(prod),
         ),
       ),
     );
   }
+
+  // --- LÓGICA DE CARRITO Y ALERTAS ---
+
+  Future<void> _guardarEnCarrito(dynamic pId, String qty, double price) async {
+    try {
+      final res = await TiendaService.agregarAlCarrito(
+        baseUrl: widget.baseUrl,
+        pId: pId,
+        qty: qty,
+        price: price,
+        idSuc: sucursalSeleccionada,
+      );
+
+      if (res.statusCode == 200 && mounted) {
+        _actualizarContadorCarrito();
+
+        // --- NUEVO AVISO VISUAL PERSONALIZADO ---
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: const [
+                Expanded(
+                  child: Text(
+                    "El producto se agrego a tu carrito.",
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+                Icon(Icons.check_circle, color: Colors.blue), // Palomita azul
+              ],
+            ),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+            behavior: SnackBarBehavior
+                .floating, // Para que no lo tape la barra de Android
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        );
+      } else if (mounted) {
+        final errorData = json.decode(res.body);
+        if (errorData['error'] == "DIFERENTE_SUCURSAL") {
+          _mostrarAlertaVaciarCarrito();
+        } else {
+          _mostrarAlerta(errorData['message'] ?? "Sin stock");
+        }
+      }
+    } catch (e) {
+      debugPrint("Error en carrito: $e");
+    }
+  }
+
+  void _mostrarAlerta(String mensaje) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Atención"),
+        content: Text(mensaje),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("ACEPTAR"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _mostrarAlertaVaciarCarrito() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Carrito con otra sucursal"),
+        content: const Text(
+          "Tu carrito contiene productos de otro almacén. ¿Deseas vaciarlo?",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("CANCELAR"),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              await TiendaService.vaciarCarrito(widget.baseUrl);
+              if (mounted) {
+                Navigator.pop(context);
+                _actualizarContadorCarrito();
+              }
+            },
+            child: const Text("VACIAR Y CONTINUAR"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _actualizarContadorCarrito() async {
+    try {
+      int nuevoTotal = await TiendaService.getCarritoCount(widget.baseUrl);
+      if (nuevoTotal != totalItemsCarrito && mounted) {
+        setState(() => totalItemsCarrito = nuevoTotal);
+      }
+    } catch (e) {
+      debugPrint("Error contador: $e");
+    }
+  }
+
+  Future<void> _reproducirBip() async {
+    try {
+      await _audioPlayer.play(AssetSource('sounds/beep.mp3'));
+    } catch (e) {
+      debugPrint("Error sonido: $e");
+    }
+  }
+
+  // --- OTROS MÉTODOS DE APOYO ---
 
   void _mostrarInfoSucursal(dynamic suc) {
     showDialog(
@@ -244,8 +330,7 @@ class _TiendaScreenState extends State<TiendaScreen> {
         ),
         content: SingleChildScrollView(
           child: Text(
-            suc['InfoEnvio'] ??
-                "No hay descripción de envío disponible para esta sucursal.",
+            suc['InfoEnvio'] ?? "No hay descripción disponible.",
             style: const TextStyle(fontSize: 14, height: 1.4),
           ),
         ),
@@ -271,230 +356,80 @@ class _TiendaScreenState extends State<TiendaScreen> {
   }
 
   void _cambiarSucursal(dynamic suc) async {
-    // 1. Obtenemos la instancia de memoria
     final prefs = await SharedPreferences.getInstance();
-
     var rawId = suc['ID'] ?? suc['id'] ?? suc['Id'];
     int id = int.tryParse(rawId.toString()) ?? 1;
     String nombre = suc['sucursal'] ?? "Sucursal";
-
-    // 2. Guardamos permanentemente
     await prefs.setInt('saved_sucursal_id', id);
     await prefs.setString('saved_sucursal_nombre', nombre);
 
-    setState(() {
-      sucursalActual = suc;
-      sucursalSeleccionada = id;
-      nombreSucursal = nombre;
-      productos = [];
-      _paginaActual = 0;
-    });
-    _cargarDatosIniciales();
+    if (mounted) {
+      setState(() {
+        sucursalActual = suc;
+        sucursalSeleccionada = id;
+        nombreSucursal = nombre;
+        productos = [];
+        _paginaActual = 0;
+      });
+      _cargarDatosIniciales();
+    }
   }
 
-  Future<void> _actualizarContadorCarrito() async {
+  Future<void> buscarProductos(String query) async {
+    if (!mounted) return;
+    setState(() {
+      cargando = true;
+      _paginaActual = 0;
+      productos = [];
+    });
     try {
-      final res = await http.get(
-        Uri.parse('${widget.baseUrl}/api/carrito/contar?ip_add=APP_USER'),
+      final data = await TiendaService.fetchInventario(
+        baseUrl: widget.baseUrl,
+        query: query,
+        page: 0,
+        idSuc: sucursalSeleccionada,
+        seed: sessionSeed,
       );
-      if (res.statusCode == 200) {
-        final data = json.decode(res.body);
-        int nuevoTotal = int.tryParse(data['total']?.toString() ?? '0') ?? 0;
-
-        // SOLO hacemos setState si el número CAMBIÓ realmente
-        if (nuevoTotal != totalItemsCarrito) {
-          setState(() => totalItemsCarrito = nuevoTotal);
-        }
+      if (mounted) {
+        setState(() {
+          productos = data;
+          _hayMasProductos = data.length >= 10;
+        });
+        if (data.isNotEmpty) buscadorCtrl.clear();
       }
     } catch (e) {
-      debugPrint("Error contador: $e");
+      debugPrint("Error búsqueda: $e");
+    } finally {
+      if (mounted) setState(() => cargando = false);
     }
   }
 
   Future<void> _cargarMasProductos() async {
-    if (_cargandoMas || !_hayMasProductos) return;
+    if (_cargandoMas || !_hayMasProductos || !mounted) return;
     setState(() => _cargandoMas = true);
     _paginaActual++;
     try {
       String busqueda = categoriaSeleccionada == "TODOS"
           ? ""
           : categoriaSeleccionada;
-      final response = await http.get(
-        Uri.parse(
-          '${widget.baseUrl}/api/inventario?q=$busqueda&page=$_paginaActual&idSuc=$sucursalSeleccionada',
-        ),
+      final nuevos = await TiendaService.fetchInventario(
+        baseUrl: widget.baseUrl,
+        query: busqueda,
+        page: _paginaActual,
+        idSuc: sucursalSeleccionada,
+        seed: sessionSeed,
       );
-      if (response.statusCode == 200) {
-        List<dynamic> nuevos = json.decode(response.body);
+      if (mounted) {
         setState(() {
           _hayMasProductos = nuevos.length >= 10;
           productos.addAll(nuevos);
         });
       }
-    } finally {
-      setState(() => _cargandoMas = false);
-    }
-  }
-
-  // --- AGREGAR ESTA DEFINICIÓN ---
-  final AudioPlayer _audioPlayer = AudioPlayer();
-
-  Future<void> _reproducirBip() async {
-    try {
-      await _audioPlayer.play(AssetSource('sounds/beep.mp3'));
     } catch (e) {
-      debugPrint("Error al reproducir sonido: $e");
-    }
-  }
-
-  Future<void> buscarProductos(String query) async {
-    setState(() {
-      cargando = true;
-      _paginaActual = 0;
-      _hayMasProductos = true;
-      productos = [];
-    });
-    try {
-      final response = await http.get(
-        Uri.parse(
-          '${widget.baseUrl}/api/inventario?q=$query&page=0&idSuc=$sucursalSeleccionada',
-        ),
-      );
-      if (response.statusCode == 200) {
-        List<dynamic> data = json.decode(response.body);
-        setState(() {
-          productos = data;
-          _hayMasProductos = data.length >= 10;
-        });
-        if (data.isNotEmpty) {
-          buscadorCtrl.clear();
-        }
-      }
+      _paginaActual--;
     } finally {
-      setState(() => cargando = false);
+      if (mounted) setState(() => _cargandoMas = false);
     }
-  }
-
-  Future<void> _guardarEnCarrito(dynamic pId, String qty, double price) async {
-    try {
-      final res = await http.post(
-        Uri.parse('${widget.baseUrl}/api/agregar_carrito'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'p_id': pId,
-          'qty': qty,
-          'p_price': price.toString(),
-          'ip_add': 'APP_USER',
-          'num_suc': sucursalSeleccionada,
-          'is_increment': true,
-        }),
-      );
-
-      if (res.statusCode == 200) {
-        if (mounted) Navigator.pop(context); // Éxito: Cerramos modal
-        _reproducirBip();
-        _actualizarContadorCarrito();
-      } else {
-        final errorData = json.decode(res.body);
-
-        if (errorData['error'] == "DIFERENTE_SUCURSAL") {
-          _mostrarAlertaVaciarCarrito();
-        } else {
-          // --- NUEVO: Alerta de Stock que sí se ve ---
-          showDialog(
-            context: context,
-            builder: (ctx) => AlertDialog(
-              title: const Text("Atención"),
-              content: Text(errorData['message'] ?? "Sin stock"),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text("ACEPTAR"),
-                ),
-              ],
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      debugPrint("Error: $e");
-    }
-  }
-
-  void _mostrarFichaProducto(dynamic item) {
-    FocusScope.of(context).unfocus();
-
-    // Usamos PageRouteBuilder para controlar EXACTAMENTE la animación
-    Navigator.push(
-      context,
-      PageRouteBuilder(
-        transitionDuration: const Duration(milliseconds: 300),
-        reverseTransitionDuration: const Duration(milliseconds: 200),
-        pageBuilder: (context, animation, secondaryAnimation) =>
-            FichaProductoPage(
-              item: item,
-              baseUrl: widget.baseUrl,
-              rojoFactory: rojoFactory,
-              onAgregar: (itemSeleccionado) =>
-                  _mostrarSelectorCantidad(itemSeleccionado),
-            ),
-        // Esta es la clave: Usamos un FadeTransition en lugar del zoom de Android
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          return FadeTransition(opacity: animation, child: child);
-        },
-      ),
-    );
-  }
-
-  void _mostrarAlertaVaciarCarrito() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Carrito con otra sucursal"),
-        content: const Text(
-          "Tu carrito contiene productos de otro almacén. ¿Deseas vaciarlo?",
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("CANCELAR"),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () async {
-              await http.post(
-                Uri.parse('${widget.baseUrl}/api/carrito/vaciar'),
-                body: json.encode({'ip_add': 'APP_USER'}),
-                headers: {'Content-Type': 'application/json'},
-              );
-              Navigator.pop(context);
-              _actualizarContadorCarrito();
-            },
-            child: const Text("VACIAR Y CONTINUAR"),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _cerrarSesion() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('cliente_id');
-    await prefs.remove('cliente_nombre');
-
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Sesión cerrada correctamente")),
-    );
-
-    setState(() {
-      // En lugar de null, lo ponemos como Invitado directamente
-      nombreCliente = "Invitado";
-    });
-
-    // Esto recargará las preferencias y confirmará que todo está limpio
-    _cargarSesion();
   }
 
   void _mostrarDialogoCerrarSesion() {
@@ -511,21 +446,13 @@ class _TiendaScreenState extends State<TiendaScreen> {
           TextButton(
             onPressed: () async {
               final prefs = await SharedPreferences.getInstance();
-              // Borramos los datos del cliente
               await prefs.remove('cliente_id');
               await prefs.remove('cliente_nombre');
-
-              if (!mounted) return;
-              Navigator.pop(context); // Cerramos el diálogo
-              setState(() {
-                nombreCliente = "Invitado";
-              });
-              // Refrescamos la sesión para que cambie a "Invitado"
-              _cargarSesion();
-
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(const SnackBar(content: Text("Sesión cerrada")));
+              if (mounted) {
+                Navigator.pop(context);
+                setState(() => nombreCliente = "Invitado");
+                _cargarSesion();
+              }
             },
             child: const Text(
               "CERRAR SESIÓN",
@@ -537,139 +464,11 @@ class _TiendaScreenState extends State<TiendaScreen> {
     );
   }
 
-  void _mostrarSelectorCantidad(dynamic item) {
-    TextEditingController cantCtrl = TextEditingController(text: "1");
-    double p1 = double.tryParse(item['Precio1']?.toString() ?? '0') ?? 0.0;
-    double p2 = double.tryParse(item['Precio2']?.toString() ?? '0') ?? 0.0;
-    double p3 = double.tryParse(item['Precio3']?.toString() ?? '0') ?? 0.0;
-    int min2 = (double.tryParse(item['Min2']?.toString() ?? '0') ?? 0).toInt();
-    int min3 = (double.tryParse(item['Min3']?.toString() ?? '0') ?? 0).toInt();
-
-    // --- NUEVO: Extraemos el stock que viene del servidor ---
-    int stockDisponible =
-        int.tryParse(item['stock_disponible']?.toString() ?? '0') ?? 0;
-
-    double precioCalculado = p1;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setModalState) => Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(context).viewInsets.bottom,
-            left: 20,
-            right: 20,
-            top: 20,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                item['Descripcion'] ?? '',
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                ),
-              ),
-              // --- NUEVO: Indicador visual de stock ---
-              const SizedBox(height: 5),
-              Text(
-                "Stock disponible: $stockDisponible pzas",
-                style: TextStyle(
-                  fontSize: 13,
-                  color: stockDisponible > 0 ? Colors.blueGrey : Colors.red,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              const SizedBox(height: 15),
-              TextField(
-                controller: cantCtrl,
-                keyboardType: TextInputType.number,
-                autofocus: true,
-                decoration: const InputDecoration(
-                  labelText: "Cantidad",
-                  border: OutlineInputBorder(),
-                ),
-                onChanged: (v) {
-                  int c = int.tryParse(v) ?? 0;
-                  setModalState(() {
-                    if (c >= min3 && min3 > 0)
-                      precioCalculado = p3;
-                    else if (c >= min2 && min2 > 0)
-                      precioCalculado = p2;
-                    else
-                      precioCalculado = p1;
-                  });
-                },
-              ),
-              const SizedBox(height: 15),
-              Text(
-                "Precio: ${formatCurrency(precioCalculado)}",
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: rojoFactory,
-                ),
-              ),
-              const SizedBox(height: 15),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: rojoFactory),
-                  onPressed: () {
-                    // --- EL CANDADO DE SEGURIDAD ---
-                    int cant = int.tryParse(cantCtrl.text) ?? 0;
-
-                    // 1. Validar que sea mayor a 0
-                    if (cant <= 0) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text("La cantidad debe ser mayor a cero"),
-                          backgroundColor: Colors.orange,
-                        ),
-                      );
-                      return;
-                    }
-
-                    // 2. Validar que no supere el stock
-                    if (cant > stockDisponible) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            "Solo hay $stockDisponible unidades disponibles",
-                          ),
-                          backgroundColor: Colors.red,
-                        ),
-                      );
-                      return;
-                    }
-
-                    // Si pasa los filtros, guardamos
-                    _guardarEnCarrito(
-                      item['Id'],
-                      cant.toString(),
-                      precioCalculado,
-                    );
-                  },
-                  child: const Text(
-                    "AGREGAR AL CARRITO",
-                    style: TextStyle(color: Colors.white),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
+      // El drawer se mantiene igual
       drawer: rolAdmin != null
           ? Drawer(
               child: ListView(
@@ -706,14 +505,12 @@ class _TiendaScreenState extends State<TiendaScreen> {
         backgroundColor: rojoFactory,
         foregroundColor: Colors.white,
         title: GestureDetector(
-          onLongPress: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => AdminLoginScreen(baseUrl: widget.baseUrl),
-              ),
-            );
-          },
+          onLongPress: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => AdminLoginScreen(baseUrl: widget.baseUrl),
+            ),
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -721,7 +518,6 @@ class _TiendaScreenState extends State<TiendaScreen> {
                 "Factory Mayoreo",
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
               ),
-              // Sucursal actual
               Row(
                 children: [
                   const Icon(Icons.storefront, size: 12, color: Colors.white70),
@@ -732,14 +528,12 @@ class _TiendaScreenState extends State<TiendaScreen> {
                   ),
                 ],
               ),
-              // Nombre del cliente DEBAJO
               Text(
                 (nombreCliente == null || nombreCliente == "Invitado")
                     ? "Hola invitado"
                     : "Hola, $nombreCliente",
                 style: const TextStyle(
                   fontSize: 11,
-                  color: Colors.white,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -747,165 +541,111 @@ class _TiendaScreenState extends State<TiendaScreen> {
           ),
         ),
         actions: [
-          // 1. EL CARRITO (Ahora primero)
-          Stack(
-            alignment: Alignment.center,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.shopping_cart),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) =>
-                          CarritoScreen(baseUrl: widget.baseUrl),
-                    ),
-                  ).then((_) => _actualizarContadorCarrito());
-                },
-              ),
-              if (totalItemsCarrito > 0)
-                Positioned(
-                  right: 8,
-                  top: 8,
-                  child: Container(
-                    padding: const EdgeInsets.all(2),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    constraints: const BoxConstraints(
-                      minWidth: 14,
-                      minHeight: 14,
-                    ),
-                    child: Text(
-                      '$totalItemsCarrito',
-                      style: const TextStyle(
-                        color: Colors.red,
-                        fontSize: 8,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          // 2. ICONO DE SUCURSAL (Si existe)
+          _buildBotonCarrito(),
           if (sucursales.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.location_on, size: 22),
-              onPressed:
-                  _mostrarModalSucursales, // Asegúrate de que esta sea tu función
+              onPressed: _mostrarModalSucursales,
             ),
-          // 3. CERRAR SESIÓN (Ahora al final)
-          IconButton(
-            icon: Icon(
-              // Si es invitado, mostramos un icono de "Usuario/Perfil" para invitar a entrar
-              // Si ya inició sesión, mostramos el icono clásico de "Salir"
-              nombreCliente == "Invitado"
-                  ? Icons.account_circle_outlined
-                  : Icons.exit_to_app,
-              size: 26, // Lo hacemos un poco más grande para que se vea mejor
-            ),
-            tooltip: nombreCliente == "Invitado"
-                ? "Iniciar Sesión"
-                : "Cerrar Sesión",
-            onPressed: () {
-              if (nombreCliente == "Invitado") {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => LoginScreen(baseUrl: widget.baseUrl),
-                  ),
-                ).then((_) => _cargarSesion());
-              } else {
-                _mostrarDialogoCerrarSesion();
-              }
-            },
-          ),
+          _buildBotonLoginOut(),
         ],
         bottom: PreferredSize(
-          // Reducimos la altura de 110 a 90 para que sea más delgada
           preferredSize: const Size.fromHeight(95),
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 15,
-                  vertical: 4,
-                ),
-                child: SizedBox(
-                  height: 40, // Altura fija más delgada para el buscador
-                  child: TextField(
-                    controller: buscadorCtrl,
-                    textAlignVertical: TextAlignVertical.center,
-                    decoration: InputDecoration(
-                      hintText: "Buscar productos...",
-                      hintStyle: const TextStyle(fontSize: 13),
-                      prefixIcon: const Icon(Icons.search, size: 20),
-                      fillColor: Colors.white,
-                      filled: true,
-                      isDense: true, // Hace la caja más compacta
-                      contentPadding: EdgeInsets.zero,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(20),
-                        borderSide: BorderSide.none,
+          child: _buildBuscadorYCategorias(),
+        ),
+      ),
+      // --- AQUÍ APLICAMOS EL CAMBIO PARA HACERLA UNIVERSAL ---
+      body: SafeArea(
+        bottom: true, // Protege contra la barra de navegación de Android
+        top: false, // El AppBar ya se encarga de la parte de arriba
+        child: Column(
+          children: [
+            Expanded(
+              child: cargando && productos.isEmpty
+                  ? const Center(child: CircularProgressIndicator())
+                  : productos.isEmpty
+                  ? const Center(child: Text("Sin stock en este almacén"))
+                  : GridView.builder(
+                      controller: _scrollController,
+                      // Añadimos un poco más de padding al fondo para asegurar que el último botón respire
+                      padding: const EdgeInsets.only(
+                        left: 8,
+                        right: 8,
+                        top: 8,
+                        bottom: 20,
                       ),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 2,
+                            childAspectRatio: 0.55,
+                            crossAxisSpacing: 8,
+                            mainAxisSpacing: 8,
+                          ),
+                      itemCount: productos.length,
+                      itemBuilder: (context, index) {
+                        final item = productos[index];
+                        return ProductCard(
+                          item: item,
+                          baseUrl: widget.baseUrl,
+                          onTap: () => _mostrarFichaProducto(item),
+                          onAgregar: () => _mostrarSelectorCantidad(item),
+                        );
+                      },
                     ),
-                    onSubmitted: (val) => buscarProductos(val),
-                  ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  // --- WIDGETS DE APOYO DE UI ---
+
+  Widget _buildBuscadorYCategorias() {
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 4),
+          child: SizedBox(
+            height: 40,
+            child: TextField(
+              controller: buscadorCtrl,
+              textAlignVertical: TextAlignVertical
+                  .center, // <-- ESTO CENTRA EL TEXTO VERTICALMENTE
+              decoration: InputDecoration(
+                hintText: "Buscar productos...",
+                hintStyle: const TextStyle(color: Colors.grey, fontSize: 14),
+                prefixIcon: const Icon(
+                  Icons.search,
+                  size: 20,
+                  color: Colors.grey,
+                ),
+                fillColor: Colors.white,
+                filled: true,
+                // Ajustamos el padding interno para que no empuje el texto
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 15,
+                  vertical: 0,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(20),
+                  borderSide: BorderSide.none,
                 ),
               ),
-              // Selector de categorías (también un poco más compacto)
-              SizedBox(
-                height: 40,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  children: [
-                    _buildCatItem("TODOS"),
-                    ...categorias.map((c) => _buildCatItem(c['Descripcion'])),
-                  ],
-                ),
-              ),
+              onSubmitted: (val) => buscarProductos(val),
+            ),
+          ),
+        ),
+        SizedBox(
+          height: 40,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            children: [
+              _buildCatItem("TODOS"),
+              ...categorias.map((c) => _buildCatItem(c['Descripcion'])),
             ],
           ),
         ),
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: cargando && productos.isEmpty
-                ? const Center(child: CircularProgressIndicator())
-                : productos.isEmpty
-                ? const Center(child: Text("Sin stock en este almacén"))
-                : GridView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.all(8),
-                    // PROPIEDADES DE FLUIDEZ:
-                    physics:
-                        const AlwaysScrollableScrollPhysics(), // Scroll más natural
-                    cacheExtent:
-                        250, // Pre-carga solo una pequeña parte (ahorra RAM)
-                    addAutomaticKeepAlives:
-                        false, // No mantiene vivos los que no se ven
-                    addRepaintBoundaries: true,
-
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      childAspectRatio:
-                          0.52, // Ajusta este valor si ves que se corta el botón
-                      crossAxisSpacing: 8,
-                      mainAxisSpacing: 8,
-                    ),
-                    itemCount: productos.length,
-                    itemBuilder: (context, index) {
-                      // Usamos const o widgets estables para que no parpadee
-                      return _buildProductCard(productos[index]);
-                    },
-                  ),
-          ),
-        ],
-      ),
+      ],
     );
   }
 
@@ -913,8 +653,10 @@ class _TiendaScreenState extends State<TiendaScreen> {
     bool seleccionada = categoriaSeleccionada == nombre;
     return GestureDetector(
       onTap: () {
-        setState(() => categoriaSeleccionada = nombre);
-        buscarProductos(nombre == "TODOS" ? "" : nombre);
+        if (mounted) {
+          setState(() => categoriaSeleccionada = nombre);
+          buscarProductos(nombre == "TODOS" ? "" : nombre);
+        }
       },
       child: Container(
         margin: const EdgeInsets.all(8),
@@ -937,300 +679,71 @@ class _TiendaScreenState extends State<TiendaScreen> {
     );
   }
 
-  Widget _buildProductCard(dynamic item) {
-    // Extraemos precios y mínimos con la misma lógica que la ficha detallada
-    double p1 = double.tryParse(item['Precio1']?.toString() ?? '0') ?? 0.0;
-    double p2 = double.tryParse(item['Precio2']?.toString() ?? '0') ?? 0.0;
-    double p3 = double.tryParse(item['Precio3']?.toString() ?? '0') ?? 0.0;
-    int m1 = (double.tryParse(item['Min1']?.toString() ?? '1') ?? 1).toInt();
-    int m2 = (double.tryParse(item['Min2']?.toString() ?? '0') ?? 0).toInt();
-    int m3 = (double.tryParse(item['Min3']?.toString() ?? '0') ?? 0).toInt();
-
-    int preciosActivos = 0;
-    if (p1 > 0) preciosActivos++;
-    if (p2 > 0) preciosActivos++;
-    if (p3 > 0) preciosActivos++;
-
-    return Card(
-      elevation: 4,
-      child: Column(
-        children: [
-          Expanded(
-            child: GestureDetector(
-              onTap: () => _mostrarFichaProducto(item),
-              child: ClipRRect(
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(4),
-                ),
-                child:
-                    item['Foto'] != null && item['Foto'].toString().isNotEmpty
-                    ? Image.network(
-                        '${widget.baseUrl}/uploads/${item['Foto']}',
-                        fit: BoxFit.cover,
-                        width: double.infinity,
-                        cacheWidth: 300, // Seguimos optimizando memoria
-                        cacheHeight: 300,
-
-                        // EFECTO FADE-IN
-                        frameBuilder:
-                            (context, child, frame, wasSynchronouslyLoaded) {
-                              if (wasSynchronouslyLoaded) return child;
-                              return AnimatedOpacity(
-                                opacity: frame == null ? 0 : 1,
-                                duration: const Duration(
-                                  milliseconds: 500,
-                                ), // Medio segundo de suavizado
-                                curve: Curves.easeIn,
-                                child: child,
-                              );
-                            },
-                        errorBuilder: (c, e, s) => const Icon(
-                          Icons.image_not_supported,
-                          color: Colors.grey,
-                        ),
-                      )
-                    : const Icon(Icons.image, size: 50),
+  Widget _buildBotonCarrito() {
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        IconButton(
+          icon: const Icon(Icons.shopping_cart),
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => CarritoScreen(baseUrl: widget.baseUrl),
               ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item['Descripcion'] ?? '',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                  ),
-                ),
-                Text(
-                  "Cve: ${item['Clave']}",
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: Colors.black,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const Divider(color: Colors.black12),
-
-                // --- LÓGICA DE PRECIOS IGUAL A LA FICHA DETALLADA ---
-                if (preciosActivos == 1)
-                  _buildPrecioFila("Precio:", p1, Colors.black, false)
-                else ...[
-                  if (p1 > 0)
-                    _buildPrecioFila(
-                      "A partir de $m1 pzas:",
-                      p1,
-                      Colors.black,
-                      false,
-                    ),
-                  if (p2 > 0)
-                    _buildPrecioFila(
-                      "A partir de $m2 pzas:",
-                      p2,
-                      rojoFactory,
-                      false,
-                    ),
-                  if (p3 > 0)
-                    _buildPrecioFila(
-                      "A partir de $m3 pzas:",
-                      p3,
-                      const Color(0xFF388E3C),
-                      false,
-                    ),
-                ],
-
-                const SizedBox(height: 6),
-                SizedBox(
-                  width: double.infinity,
-                  height: 35,
-                  child: ElevatedButton(
-                    onPressed: () => _mostrarSelectorCantidad(item),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: rojoFactory,
-                    ),
-                    child: const Text(
-                      "AGREGAR",
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPrecioFila(String label, double price, Color col, bool esFicha) {
-    return Padding(
-      padding: EdgeInsets.symmetric(vertical: esFicha ? 6 : 2),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: esFicha ? 16 : 9,
-              color: Colors.black,
-              fontWeight: esFicha ? FontWeight.bold : FontWeight.w500,
-            ),
-          ),
-          Text(
-            formatCurrency(price),
-            style: TextStyle(
-              fontSize: esFicha ? 26 : 14,
-              fontWeight: FontWeight.bold,
-              color: col,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-} // Cierre de la clase _TiendaScreenState
-
-class FichaProductoPage extends StatelessWidget {
-  final dynamic item;
-  final String baseUrl;
-  final Color rojoFactory;
-  final Function(dynamic) onAgregar;
-
-  const FichaProductoPage({
-    super.key,
-    required this.item,
-    required this.baseUrl,
-    required this.rojoFactory,
-    required this.onAgregar,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    // Reutilizamos tu lógica de precios
-    double p1 = double.tryParse(item['Precio1']?.toString() ?? '0') ?? 0.0;
-    double p2 = double.tryParse(item['Precio2']?.toString() ?? '0') ?? 0.0;
-    double p3 = double.tryParse(item['Precio3']?.toString() ?? '0') ?? 0.0;
-    int m1 = (double.tryParse(item['Min1']?.toString() ?? '1') ?? 1).toInt();
-    int m2 = (double.tryParse(item['Min2']?.toString() ?? '0') ?? 0).toInt();
-    int m3 = (double.tryParse(item['Min3']?.toString() ?? '0') ?? 0).toInt();
-
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.close, color: Colors.black),
-          onPressed: () async {
-            // Cerramos el teclado si estuviera abierto
-            FocusScope.of(context).unfocus();
-            // Le damos un respiro de 50ms antes de iniciar la salida
-            await Future.delayed(const Duration(milliseconds: 50));
-            if (context.mounted) Navigator.pop(context);
+            ).then((_) {
+              if (mounted) _actualizarContadorCarrito();
+            });
           },
         ),
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: InteractiveViewer(
-              child: Center(
-                child:
-                    item['Foto'] != null && item['Foto'].toString().isNotEmpty
-                    ? Image.network(
-                        '$baseUrl/uploads/${item['Foto']}',
-                        fit: BoxFit.contain,
-                        gaplessPlayback: true,
-                      )
-                    : const Icon(Icons.image, size: 100, color: Colors.grey),
+        if (totalItemsCarrito > 0)
+          Positioned(
+            right: 8,
+            top: 8,
+            child: Container(
+              padding: const EdgeInsets.all(2),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              constraints: const BoxConstraints(minWidth: 14, minHeight: 14),
+              child: Text(
+                '$totalItemsCarrito',
+                style: const TextStyle(
+                  color: Colors.red,
+                  fontSize: 8,
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
               ),
             ),
           ),
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black12,
-                  blurRadius: 10,
-                  offset: Offset(0, -5),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  item['Descripcion'] ?? '',
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 15),
-                // Aquí podrías llamar a una función similar a _buildPrecioFila
-                // Para simplificar esta prueba, puedes poner los precios directos o el widget
-                _buildPrecioFilaLocal("Precio:", p1, Colors.black),
-                if (p2 > 0)
-                  _buildPrecioFilaLocal(
-                    "A partir de $m2 pzas:",
-                    p2,
-                    rojoFactory,
-                  ),
-                const SizedBox(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: rojoFactory,
-                    ),
-                    onPressed: () {
-                      Navigator.pop(context);
-                      onAgregar(item);
-                    },
-                    child: const Text(
-                      "AGREGAR AL PEDIDO",
-                      style: TextStyle(color: Colors.white, fontSize: 16),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+      ],
     );
   }
 
-  Widget _buildPrecioFilaLocal(String label, double price, Color col) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-        ),
-        Text(
-          "\$${price.toStringAsFixed(2)}",
-          style: TextStyle(
-            fontSize: 26,
-            fontWeight: FontWeight.bold,
-            color: col,
-          ),
-        ),
-      ],
+  Widget _buildBotonLoginOut() {
+    return IconButton(
+      icon: Icon(
+        nombreCliente == "Invitado"
+            ? Icons.account_circle_outlined
+            : Icons.exit_to_app,
+        size: 26,
+      ),
+      onPressed: () {
+        if (nombreCliente == "Invitado") {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => LoginScreen(baseUrl: widget.baseUrl),
+            ),
+          ).then((_) {
+            if (mounted) _cargarSesion();
+          });
+        } else {
+          _mostrarDialogoCerrarSesion();
+        }
+      },
     );
   }
 }

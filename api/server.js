@@ -57,6 +57,32 @@ function calcularValores(precio, costo) {
 // RUTAS DE FOTOS
 // ==========================================
 
+// --- PRIMERO LA RUTA ESPECÍFICA ---
+app.get('/api/producto/stock-actual', async (req, res) => {
+    const { p_id, num_suc } = req.query;
+    try {
+        const sql = `
+            SELECT 
+                p.Min1, 
+                IFNULL(a.ExisPVentas, 0) as stock_disponible
+            FROM productos p
+            LEFT JOIN alm${num_suc} a ON p.Clave = a.Clave
+            WHERE p.Id = ?`;
+            
+        const [results] = await db.execute(sql, [p_id]);
+        
+        if (results.length > 0) {
+            res.json(results[0]);
+        } else {
+            res.json({ Min1: 1, stock_disponible: 0 });
+        }
+    } catch (e) {
+        console.error("Error en stock-actual:", e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+
 app.post('/api/producto/upload-foto', upload.single('foto'), async (req, res) => {
     const { clave } = req.body;
     if (!req.file) return res.status(400).json({ success: false, message: 'No se subió ningún archivo' });
@@ -92,6 +118,8 @@ app.post('/api/producto/delete-foto', async (req, res) => {
 // RUTA CRÍTICA: Obtener un solo producto para la pantalla de EDICIÓN
 app.get('/api/producto/:clave', async (req, res) => {
     const { clave } = req.params;
+    
+    // Eliminamos los CONVERT para usar los índices B-Tree que ya creamos
     const query = `
         SELECT p.*, 
                a1.ExisPVentas AS alm1_pventas, a1.ExisBodega AS alm1_bodega, a1.ACTIVO AS alm1_activo,
@@ -100,17 +128,21 @@ app.get('/api/producto/:clave', async (req, res) => {
                a4.ExisPVentas AS alm4_pventas, a4.ExisBodega AS alm4_bodega, a4.ACTIVO AS alm4_activo,
                a5.ExisPVentas AS alm5_pventas, a5.ExisBodega AS alm5_bodega, a5.ACTIVO AS alm5_activo 
         FROM productos p 
-        LEFT JOIN alm1 a1 ON p.Clave = CONVERT(a1.Clave USING utf8mb3)
-        LEFT JOIN alm2 a2 ON p.Clave = CONVERT(a2.Clave USING utf8mb3)
-        LEFT JOIN alm3 a3 ON p.Clave = CONVERT(a3.Clave USING utf8mb3)
-        LEFT JOIN alm4 a4 ON p.Clave = CONVERT(a4.Clave USING utf8mb3)
-        LEFT JOIN alm5 a5 ON p.Clave = CONVERT(a5.Clave USING utf8mb3)
+        LEFT JOIN alm1 a1 ON p.Clave = a1.Clave
+        LEFT JOIN alm2 a2 ON p.Clave = a2.Clave
+        LEFT JOIN alm3 a3 ON p.Clave = a3.Clave
+        LEFT JOIN alm4 a4 ON p.Clave = a4.Clave
+        LEFT JOIN alm5 a5 ON p.Clave = a5.Clave
         WHERE p.Clave = ?`;
+
     try {
+        // Al usar db.execute con el índice en p.Clave, la respuesta es de nivel milisegundos
         const [results] = await db.execute(query, [clave]);
-        res.json(results[0] || {}); // Enviamos el primer resultado o un objeto vacío
+        
+        // Enviamos el primer resultado o un objeto vacío si no existe
+        res.json(results[0] || {}); 
     } catch (e) {
-        console.error("Error al obtener producto individual:", e.message);
+        console.error("Error al obtener producto individual optimizado:", e.message);
         res.status(500).json({ error: e.message });
     }
 });
@@ -347,42 +379,22 @@ app.get('/api/reportes/retiros-detalle', async (req, res) => {
     }
 });
 
-// OBTENER PRODUCTOS DEL CARRITO
+// OBTENER PRODUCTOS DEL CARRITO (Versión Corregida y Optimizada)
 app.get('/api/carrito', async (req, res) => {
     const ip_add = req.query.ip_add || 'APP_USER';
-    
-    // Esta consulta es más robusta: busca el stock en el almacén que indica el carrito
-    const sql = `
-        SELECT 
-            c.p_id, c.qty, c.p_price, c.num_suc,
-            p.Descripcion, p.Foto, p.Clave,
-            p.Precio1, p.Precio2, p.Precio3, p.Min1, p.Min2, p.Min3,
-            COALESCE(e.sucursal, 'Almacén') AS NombreSucursal,
-            -- Buscamos el stock dinámicamente según la sucursal de cada item
-            (SELECT ExisPVentas FROM 
-                (SELECT 'alm1' as t UNION SELECT 'alm2' UNION SELECT 'alm3' UNION SELECT 'alm4' UNION SELECT 'alm5') as tabs 
-                JOIN alm1 a1 ON c.num_suc = 1 AND p.Clave = a1.Clave
-                OR c.num_suc = 2 AND p.Clave = (SELECT Clave FROM alm2 WHERE Clave = p.Clave)
-                -- (Simplificado para mejor rendimiento abajo)
-                LIMIT 1
-            ) as stock_disponible
-        FROM cart c 
-        JOIN productos p ON c.p_id = p.Id 
-        LEFT JOIN Empresa e ON c.num_suc = e.ID
-        WHERE c.ip_add = ?`;
-
-    // VERSION SIMPLIFICADA Y EFECTIVA:
-    // Como usualmente un pedido es de una sola sucursal, usaremos el num_suc del primer item
     try {
-        const [items] = await db.execute("SELECT num_suc FROM cart WHERE ip_add = ? LIMIT 1", [ip_add]);
-        const sucId = items.length > 0 ? items[0].num_suc : 1;
+        const [itemsCart] = await db.execute("SELECT num_suc FROM cart WHERE ip_add = ? LIMIT 1", [ip_add]);
+        if (itemsCart.length === 0) return res.json([]);
+        const sucId = itemsCart[0].num_suc;
 
         const sqlFinal = `
-            SELECT c.*, p.Descripcion, p.Foto, p.Clave, p.Precio1, p.Precio2, p.Precio3, p.Min2, p.Min3,
-            a.ExisPVentas as stock_disponible
+            SELECT c.*, p.Descripcion, p.Foto, p.Clave, p.Precio1, p.Precio2, p.Precio3, p.Min1, p.Min2, p.Min3,
+            a.ExisPVentas as stock_disponible,
+            e.Sucursal as NombreSucursal -- <--- AHORA SÍ TRAEMOS EL NOMBRE
             FROM cart c
             JOIN productos p ON c.p_id = p.Id
             LEFT JOIN alm${sucId} a ON p.Clave = a.Clave
+            LEFT JOIN Empresa e ON e.Id = c.num_suc -- <--- JOIN AGREGADO
             WHERE c.ip_add = ?`;
 
         const [results] = await db.execute(sqlFinal, [ip_add]);
@@ -406,6 +418,7 @@ app.get('/api/carrito/contar', async (req, res) => {
 // BUSCA ESTA RUTA Y AJUSTA EL SQL:
 app.post('/api/agregar_carrito', async (req, res) => {
     const { p_id, qty, p_price, ip_add, num_suc, is_increment } = req.body;
+    const cantidadLimpia = parseInt(qty) || 1; // Si llega '', se vuelve 1
     const user_ip = ip_add || 'APP_USER';
     const tablaAlm = `alm${num_suc}`;
 
@@ -475,6 +488,51 @@ app.post('/api/carrito/eliminar', async (req, res) => {
     }
 });
 
+// En tu server.js o archivo de rutas
+// Endpoint para Validar Stock Final antes de mostrar mensaje de compromiso
+// VALIDAR STOCK FINAL: Ajustado a la estructura de tablas almX
+app.post('/api/carrito/validar-stock-final', async (req, res) => {
+    const { items, idSuc } = req.body;
+    try {
+        const detallesErrores = [];
+        for (const item of items) {
+            // Buscamos en la tabla alm correspondiente usando la Clave del producto
+            const [stockData] = await db.execute(
+                `SELECT a.ExisPVentas FROM alm${idSuc} a 
+                 JOIN productos p ON a.Clave = p.Clave 
+                 WHERE p.Id = ?`, [item.p_id]
+            );
+
+            const disponible = stockData[0]?.ExisPVentas || 0;
+            if (disponible < item.qty) {
+                detallesErrores.push({
+                    nombre: item.Descripcion,
+                    disponible: disponible,
+                    solicitado: item.qty
+                });
+            }
+        }
+        if (detallesErrores.length > 0) return res.json({ status: 'error', detalles: detallesErrores });
+        res.json({ status: 'ok' });
+    } catch (e) {
+        res.status(500).json({ status: 'error', mensaje: e.message });
+    }
+});
+
+// Endpoint corregido para usar Promesas (async/await)
+app.get('/api/mensajes/:slug', async (req, res) => {
+    const { slug } = req.params;
+    try {
+        const [rows] = await db.execute("SELECT encabezado, descripcion FROM mensaje WHERE slug = ?", [slug]);
+        if (rows.length > 0) {
+            res.json(rows[0]); // Aquí decía results, debe ser rows
+        } else {
+            res.status(404).json({ encabezado: "Aviso", descripcion: "Mensaje no encontrado" });
+        }
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
 // ==========================================
 // GESTIÓN DE PRODUCTOS (ABMC)
 // ==========================================
@@ -487,36 +545,37 @@ app.get('/api/inventario', async (req, res) => {
     const qRaw = req.query.q || '';
     const page = parseInt(req.query.page) || 0; 
     const idSuc = req.query.idSuc || 1; 
+    const seed = req.query.seed || 1; // Recibimos la semilla de la App
     const limit = 10; 
     const offset = page * limit;
-    const q = `%${qRaw.toLowerCase()}%`;
+    const q = `%${qRaw}%`;
     
     try {
+        const camposSelect = `
+            p.Id, p.Clave, p.Descripcion, p.product_desc, p.Precio1, p.Precio2, p.Precio3, 
+            p.Min1, p.Min2, p.Min3, p.Foto, p.Tipo, p.status, p.Activo,
+            CAST(a.ExisPVentas AS SIGNED) as stock_disponible
+        `;
+
         let query;
         let params;
 
-        const camposSelect = `
-            p.Id, p.Clave, p.Descripcion, p.Precio1, p.Precio2, p.Precio3, 
-            p.Min1, p.Min2, p.Min3, p.Foto, p.Tipo, p.status, p.Activo,
-            CAST(COALESCE(a.ExisPVentas, 0) AS SIGNED) as stock_disponible
-        `;
-
         if (qRaw === '') {
-            // Filtramos por status = 1 Y por existencia > 0
+            // OPTIMIZACIÓN: RAND(seed) permite aleatoriedad constante durante la sesión
             query = `SELECT ${camposSelect}
                      FROM PRODUCTOS p
-                     LEFT JOIN alm${idSuc} a ON p.Clave = CONVERT(a.Clave USING utf8mb3)
-                     WHERE p.status = 1 AND COALESCE(a.ExisPVentas, 0) > 0
-                     ORDER BY RAND() 
+                     INNER JOIN alm${idSuc} a ON p.Clave = a.Clave
+                     WHERE p.status = 1 AND a.ExisPVentas > 0
+                     ORDER BY RAND(${seed}) 
                      LIMIT ? OFFSET ?`;
             params = [limit, offset];
         } else {
-            // Filtramos por búsqueda, status = 1 Y por existencia > 0
+            // En búsquedas específicas, mantenemos el orden alfabético para que el usuario no se pierda
             query = `SELECT ${camposSelect}
                      FROM PRODUCTOS p
-                     LEFT JOIN alm${idSuc} a ON p.Clave = CONVERT(a.Clave USING utf8mb3)
-                     WHERE (LOWER(p.Clave) LIKE ? OR LOWER(p.Descripcion) LIKE ? OR LOWER(p.Tipo) LIKE ?) 
-                     AND p.status = 1 AND COALESCE(a.ExisPVentas, 0) > 0
+                     INNER JOIN alm${idSuc} a ON p.Clave = a.Clave
+                     WHERE (p.Clave LIKE ? OR p.Descripcion LIKE ? OR p.Tipo LIKE ?) 
+                     AND p.status = 1 AND a.ExisPVentas > 0
                      ORDER BY p.Descripcion ASC 
                      LIMIT ? OFFSET ?`;
             params = [q, q, q, limit, offset];
@@ -525,11 +584,10 @@ app.get('/api/inventario', async (req, res) => {
         const [results] = await db.execute(query, params);
         res.json(results);
     } catch (e) { 
-        console.error("Error en Inventario Tienda:", e.message);
+        console.error("Error en Inventario Aleatorio Optimizado:", e.message);
         res.status(500).json({ error: e.message }); 
     }
 });
-
 
 
 // --- RUTA ALTA PRODUCTO ---
@@ -644,48 +702,51 @@ app.get('/api/admin/inventario', async (req, res) => {
     const page = parseInt(req.query.page) || 0; 
     const limit = 15; 
     const offset = page * limit;
-    const q = `%${qRaw.toLowerCase()}%`;
+    const q = `%${qRaw}%`;
 
     try {
         const query = `
             SELECT 
                 p.Id, 
                 TRIM(p.Clave) as Clave, 
-                p.Descripcion, p.PzasxCaja, p.Precio1, p.Precio2, p.Precio3, 
+                p.Descripcion, p.product_desc, p.PzasxCaja, p.Precio1, p.Precio2, p.Precio3, 
                 p.Min1, p.Min2, p.Min3, p.Foto, p.status, p.Activo, p.Tipo, p.CB, p.ClavePro,
                 
-                CAST(COALESCE(MAX(a1.ExisPVentas), 0) + (COALESCE(MAX(a1.ExisBodega), 0) * COALESCE(p.PzasxCaja, 1)) AS SIGNED) AS stock1,
-                CAST(COALESCE(MAX(a2.ExisPVentas), 0) + (COALESCE(MAX(a2.ExisBodega), 0) * COALESCE(p.PzasxCaja, 1)) AS SIGNED) AS stock2,
-                CAST(COALESCE(MAX(a3.ExisPVentas), 0) + (COALESCE(MAX(a3.ExisBodega), 0) * COALESCE(p.PzasxCaja, 1)) AS SIGNED) AS stock3,
-                CAST(COALESCE(MAX(a4.ExisPVentas), 0) + (COALESCE(MAX(a4.ExisBodega), 0) * COALESCE(p.PzasxCaja, 1)) AS SIGNED) AS stock4,
-                CAST(COALESCE(MAX(a5.ExisPVentas), 0) + (COALESCE(MAX(a5.ExisBodega), 0) * COALESCE(p.PzasxCaja, 1)) AS SIGNED) AS stock5
+                -- Al ser 1 a 1, usamos COALESCE directamente. 
+                -- Mantenemos el cálculo de piezas totales (ExisPVentas + Bodega * PzasxCaja)
+                CAST(COALESCE(a1.ExisPVentas, 0) + (COALESCE(a1.ExisBodega, 0) * COALESCE(p.PzasxCaja, 1)) AS SIGNED) AS stock1,
+                CAST(COALESCE(a2.ExisPVentas, 0) + (COALESCE(a2.ExisBodega, 0) * COALESCE(p.PzasxCaja, 1)) AS SIGNED) AS stock2,
+                CAST(COALESCE(a3.ExisPVentas, 0) + (COALESCE(a3.ExisBodega, 0) * COALESCE(p.PzasxCaja, 1)) AS SIGNED) AS stock3,
+                CAST(COALESCE(a4.ExisPVentas, 0) + (COALESCE(a4.ExisBodega, 0) * COALESCE(p.PzasxCaja, 1)) AS SIGNED) AS stock4,
+                CAST(COALESCE(a5.ExisPVentas, 0) + (COALESCE(a5.ExisBodega, 0) * COALESCE(p.PzasxCaja, 1)) AS SIGNED) AS stock5
             FROM productos p
-            LEFT JOIN alm1 a1 ON p.Clave = CONVERT(a1.Clave USING utf8mb3)
-            LEFT JOIN alm2 a2 ON p.Clave = CONVERT(a2.Clave USING utf8mb3)
-            LEFT JOIN alm3 a3 ON p.Clave = CONVERT(a3.Clave USING utf8mb3)
-            LEFT JOIN alm4 a4 ON p.Clave = CONVERT(a4.Clave USING utf8mb3)
-            LEFT JOIN alm5 a5 ON p.Clave = CONVERT(a5.Clave USING utf8mb3)
+            LEFT JOIN alm1 a1 ON p.Clave = a1.Clave
+            LEFT JOIN alm2 a2 ON p.Clave = a2.Clave
+            LEFT JOIN alm3 a3 ON p.Clave = a3.Clave
+            LEFT JOIN alm4 a4 ON p.Clave = a4.Clave
+            LEFT JOIN alm5 a5 ON p.Clave = a5.Clave
             WHERE (
-                LOWER(p.Clave) LIKE ? 
-                OR LOWER(p.Descripcion) LIKE ? 
-                OR LOWER(p.CB) LIKE ? 
-                OR LOWER(p.ClavePro) LIKE ?
-                -- BÚSQUEDA EN CÓDIGOS ADICIONALES
+                p.Clave LIKE ? 
+                OR p.Descripcion LIKE ? 
+                OR p.CB LIKE ? 
+                OR p.ClavePro LIKE ?
+                -- El EXISTS es perfecto para la relación 1:N de codad porque no multiplica filas
                 OR EXISTS (
                     SELECT 1 FROM codad ca 
-                    WHERE CONVERT(ca.Clave USING utf8mb3) = p.Clave 
-                    AND LOWER(ca.CB) LIKE ?
+                    WHERE ca.Clave = p.Clave 
+                    AND ca.CB LIKE ?
                 )
             )
+            -- Agrupamos por Id para colapsar cualquier fila repetida accidental
             GROUP BY p.Id 
+            -- Ordenamos por los más nuevos primero
             ORDER BY p.Id DESC 
             LIMIT ? OFFSET ?`;
 
-        // Pasamos 5 veces la variable 'q'
         const [results] = await db.execute(query, [q, q, q, q, q, limit, offset]);
         res.json(results);
     } catch (e) { 
-        console.error("Error en Inventario Admin Completo:", e.message);
+        console.error("Error en Inventario Admin (Optimización 1:1 y 1:N):", e.message);
         res.status(500).json({ error: e.message }); 
     }
 });
@@ -777,6 +838,7 @@ app.get('/api/siguiente-cb', async (req, res) => {
 app.post('/api/cliente/registrar', async (req, res) => {
     // Recibimos los datos desde Flutter
     const { 
+        claveTelefono,
         nombreCompleto = '', 
         email = '', 
         password = '', 
