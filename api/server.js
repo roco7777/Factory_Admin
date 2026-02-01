@@ -3,6 +3,7 @@ const mysql = require('mysql2/promise');
 const cors = require('cors');
 const path = require('path');
 const multer = require('multer');
+const sharp = require('sharp');
 const fs = require('fs');
 
 const app = express();
@@ -97,19 +98,59 @@ app.get('/api/config/api_url', async (req, res) => {
     }
 });
 
+// ==========================================
+// RUTA DE SUBIDA OPTIMIZADA CON SHARP
+// ==========================================
 app.post('/api/producto/upload-foto', upload.single('foto'), async (req, res) => {
     const { clave } = req.body;
-    if (!req.file) return res.status(400).json({ success: false, message: 'No se subió ningún archivo' });
+    
+    // 1. Validar que llegó un archivo
+    if (!req.file) {
+        return res.status(400).json({ success: false, message: 'No se subió ningún archivo' });
+    }
+
     try {
-        const [rows] = await db.execute('SELECT Foto FROM PRODUCTOS WHERE Clave = ?', [clave]);
+        // Definimos las rutas
+        const rutaOriginal = req.file.path; // El archivo pesado temporal
+        const nombreFinal = `${clave}-${Date.now()}.jpg`; // Nombre estandarizado
+        const rutaFinal = path.join(rutaFotos, nombreFinal); // Destino final
+
+        // 2. PROCESAMIENTO: Redimensionar y Comprimir
+        // Esto convierte una foto de 5MB en una de ~150KB
+        await sharp(rutaOriginal)
+            .resize(800, null, { // Máximo 800px de ancho, alto automático
+                withoutEnlargement: true, 
+                fit: 'inside'
+            })
+            .jpeg({ quality: 80, mozjpeg: true }) // Calidad 80% es perfecta para móvil
+            .toFile(rutaFinal);
+
+        // 3. LIMPIEZA: Borrar el archivo pesado original
+        try {
+            if (fs.existsSync(rutaOriginal)) {
+                 fs.unlinkSync(rutaOriginal); 
+            }
+        } catch (errBorrado) {
+            console.error("No se pudo borrar el temporal, pero no afecta.");
+        }
+
+        // 4. BORRAR FOTO ANTIGUA (Si el producto ya tenía una)
+        const [rows] = await db.execute('SELECT Foto FROM productos WHERE Clave = ?', [clave]);
         if (rows.length > 0 && rows[0].Foto) {
             const viejaPath = path.join(rutaFotos, rows[0].Foto);
-            if (fs.existsSync(viejaPath)) fs.unlinkSync(viejaPath);
+            // Verificamos que no sea la misma que acabamos de crear
+            if (fs.existsSync(viejaPath) && rows[0].Foto !== nombreFinal) {
+                try { fs.unlinkSync(viejaPath); } catch(e) {}
+            }
         }
-        const nuevoNombre = req.file.filename;
-        await db.execute('UPDATE PRODUCTOS SET Foto = ? WHERE Clave = ?', [nuevoNombre, clave]);
-        res.json({ success: true, foto: nuevoNombre });
+
+        // 5. ACTUALIZAR BASE DE DATOS
+        await db.execute('UPDATE productos SET Foto = ? WHERE Clave = ?', [nombreFinal, clave]);
+        
+        res.json({ success: true, foto: nombreFinal });
+
     } catch (e) {
+        console.error("Error al procesar imagen:", e);
         res.status(500).json({ success: false, message: e.message });
     }
 });
