@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'inventario_screen.dart';
+// import 'inventario_screen.dart'; // Ya no lo necesitamos aquí
+import 'dashboard_screen.dart'; // <--- Importamos el Dashboard
 
 class AdminLoginScreen extends StatefulWidget {
   final String baseUrl;
@@ -29,19 +30,20 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
         }),
       );
       final data = json.decode(response.body);
+
       if (response.statusCode == 200 && data['success']) {
         final prefs = await SharedPreferences.getInstance();
+        // Guardamos las credenciales
         await prefs.setString('saved_user', userController.text);
         await prefs.setString('saved_rol', data['rol']?.toString() ?? 'Normal');
 
         if (!mounted) return;
+
+        // --- CAMBIO CLAVE: Redirigimos al DASHBOARD ---
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-            builder: (context) => PantallaInventario(
-              userRole: data['rol']?.toString() ?? 'Normal',
-              baseUrl: widget.baseUrl,
-            ),
+            builder: (context) => DashboardScreen(baseUrl: widget.baseUrl),
           ),
         );
       } else {
@@ -56,7 +58,7 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
         ),
       );
     } finally {
-      setState(() => isLoading = false);
+      if (mounted) setState(() => isLoading = false);
     }
   }
 

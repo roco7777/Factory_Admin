@@ -4,16 +4,13 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:audioplayers/audioplayers.dart';
 
-// --- IMPORTACIONES CORREGIDAS ---
+// --- IMPORTACIONES LIMPIAS ---
 import '../core/constants.dart';
 import '../widgets/scanner_screen.dart';
 import 'edicion_producto_screen.dart';
 import 'nuevo_producto_screen.dart';
-import 'reportes_screen.dart';
-import 'historico_screen.dart';
 import 'ficha_producto_helper.dart';
-import 'tienda_screen.dart'; // Agregamos esta para que reconozca la Tienda
-import '../main.dart'; // Para reconocer RootHandler y LoginScreen
+import 'admin_login_screen.dart';
 
 class PantallaInventario extends StatefulWidget {
   final String userRole;
@@ -41,7 +38,13 @@ class _PantallaInventarioState extends State<PantallaInventario> {
     fetchSucursalNames();
   }
 
-  // --- FUNCIÓN PARA EL SONIDO ---
+  @override
+  void dispose() {
+    buscadorController.dispose();
+    _audioPlayer.dispose();
+    super.dispose();
+  }
+
   Future<void> _reproducirBip() async {
     try {
       await _audioPlayer.play(AssetSource('sounds/beep.mp3'));
@@ -82,17 +85,12 @@ class _PantallaInventarioState extends State<PantallaInventario> {
       );
 
       if (response.statusCode == 200) {
-        // 1. Decodificamos la respuesta en una variable local llamada 'lista'
         final List<dynamic> lista = json.decode(response.body);
-
         setState(() {
           productos = lista;
         });
-        buscadorController.clear();
-        // 2. Imprimimos usando la variable correcta para debug
         if (lista.isNotEmpty) {
-          buscadorController.clear(); // Limpia el buscador
-          debugPrint("DEBUG PRODUCTO OK: ${lista[0]['Clave']}");
+          _reproducirBip();
         }
       }
     } catch (e) {
@@ -105,7 +103,8 @@ class _PantallaInventarioState extends State<PantallaInventario> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // --- DRAWER PARA NAVEGACIÓN RÁPIDA ---
+      backgroundColor: Colors.grey[100],
+      // Drawer simplificado: solo para navegación interna
       drawer: Drawer(
         child: ListView(
           padding: EdgeInsets.zero,
@@ -116,14 +115,10 @@ class _PantallaInventarioState extends State<PantallaInventario> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  Icon(
-                    Icons.admin_panel_settings,
-                    color: Colors.white,
-                    size: 40,
-                  ),
+                  Icon(Icons.inventory, color: Colors.white, size: 40),
                   SizedBox(height: 10),
                   Text(
-                    "Panel Administrativo",
+                    "Gestión de Inventario",
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 18,
@@ -134,77 +129,23 @@ class _PantallaInventarioState extends State<PantallaInventario> {
               ),
             ),
             ListTile(
-              leading: const Icon(Icons.shopping_bag, color: Colors.blue),
-              title: const Text("Modo Tienda (Cliente)"),
-              subtitle: const Text("Ver catálogo y existencias"),
-              onTap: () {
-                Navigator.pop(context); // Cierra el drawer
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => TiendaScreen(baseUrl: widget.baseUrl),
-                  ),
-                );
-              },
-            ),
-            const Divider(),
-            ListTile(
-              leading: const Icon(Icons.logout, color: Colors.red),
-              title: const Text("Cerrar Sesión Admin"),
-              onTap: () async {
-                final prefs = await SharedPreferences.getInstance();
-
-                // Limpiamos la sesión en el HP ProLiant
-                await prefs.remove('saved_user');
-                await prefs.remove('saved_rol');
-
-                if (!mounted) return;
-
-                // 1. ELIMINAMOS 'const' porque baseUrl es dinámica
-                // 2. Pasamos widget.baseUrl para no perder la conexión
-                Navigator.pushAndRemoveUntil(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => RootHandler(baseUrl: widget.baseUrl),
-                  ),
-                  (route) => false,
-                );
-              },
+              leading: const Icon(Icons.grid_view_rounded, color: Colors.blue),
+              title: const Text("Volver al Panel Principal"),
+              onTap: () => Navigator.pop(context),
             ),
           ],
         ),
       ),
-
       appBar: AppBar(
         title: const Text("Inventario Factory"),
-        backgroundColor: Colors.blue[800],
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.monetization_on, color: Colors.greenAccent),
-            tooltip: "Reportes",
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => PantallaReportes(baseUrl: widget.baseUrl),
-              ),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.calendar_month, color: Colors.orangeAccent),
-            tooltip: "Histórico",
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) =>
-                    PantallaHistorico(baseUrl: widget.baseUrl),
-              ),
-            ),
-          ),
-        ],
+        backgroundColor: Colors.blue[900], // Un azul más oscuro para inventario
+        elevation: 2,
+        // SE ELIMINARON LOS ACTIONS DE REPORTES
       ),
       floatingActionButton: FloatingActionButton(
         backgroundColor: Colors.green,
-        child: const Icon(Icons.add),
+        elevation: 4,
+        child: const Icon(Icons.add_shopping_cart),
         onPressed: () => Navigator.push(
           context,
           MaterialPageRoute(
@@ -223,11 +164,16 @@ class _PantallaInventarioState extends State<PantallaInventario> {
             child: TextField(
               controller: buscadorController,
               decoration: InputDecoration(
-                hintText: "Buscar producto...",
+                hintText: "Escribe nombre o clave...",
                 filled: true,
                 fillColor: Colors.white,
+                contentPadding: const EdgeInsets.symmetric(
+                  vertical: 0,
+                  horizontal: 16,
+                ),
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(15),
+                  borderRadius: BorderRadius.circular(30),
+                  borderSide: BorderSide.none,
                 ),
                 prefixIcon: IconButton(
                   icon: const Icon(Icons.qr_code_scanner, color: Colors.blue),
@@ -242,9 +188,20 @@ class _PantallaInventarioState extends State<PantallaInventario> {
                     }
                   },
                 ),
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.search),
-                  onPressed: buscarProductos,
+                suffixIcon: Container(
+                  margin: const EdgeInsets.all(4),
+                  decoration: const BoxDecoration(
+                    color: Colors.blue,
+                    shape: BoxShape.circle,
+                  ),
+                  child: IconButton(
+                    icon: const Icon(
+                      Icons.search,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                    onPressed: buscarProductos,
+                  ),
                 ),
               ),
               onSubmitted: (_) => buscarProductos(),
@@ -255,7 +212,10 @@ class _PantallaInventarioState extends State<PantallaInventario> {
                 ? const Center(child: CircularProgressIndicator())
                 : productos.isEmpty
                 ? const Center(
-                    child: Text("Busca un producto por clave o nombre"),
+                    child: Text(
+                      "Busca un producto para empezar",
+                      style: TextStyle(color: Colors.grey),
+                    ),
                   )
                 : ListView.builder(
                     itemCount: productos.length,
@@ -285,25 +245,24 @@ class _PantallaInventarioState extends State<PantallaInventario> {
 
   Widget _buildProductoCard(dynamic item) {
     return Card(
-      elevation: 3,
-      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      elevation: 2,
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
       child: Padding(
-        padding: const EdgeInsets.all(10.0),
+        padding: const EdgeInsets.all(12.0),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Container(
-              width: 85,
-              height: 85,
+              width: 80,
+              height: 80,
               decoration: BoxDecoration(
-                color: Colors.grey[200],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey[300]!),
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(10),
               ),
               child: item['Foto'] != null && item['Foto'].toString().isNotEmpty
                   ? ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(10),
                       child: Image.network(
                         '${widget.baseUrl}/uploads/${item['Foto']}?t=${DateTime.now().millisecondsSinceEpoch}',
                         fit: BoxFit.cover,
@@ -313,7 +272,7 @@ class _PantallaInventarioState extends State<PantallaInventario> {
                         ),
                       ),
                     )
-                  : const Icon(Icons.inventory_2, size: 35, color: Colors.grey),
+                  : const Icon(Icons.inventory_2, size: 30, color: Colors.grey),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -321,15 +280,14 @@ class _PantallaInventarioState extends State<PantallaInventario> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Expanded(
-                        child: Text(
-                          "Clave: ${item['Clave']}",
-                          style: const TextStyle(
-                            color: Color(0xFFD32F2F),
-                            fontSize: 13,
-                            fontWeight: FontWeight.bold,
-                          ),
+                      Text(
+                        item['Clave'].toString(),
+                        style: const TextStyle(
+                          color: Color(0xFFD32F2F),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
                         ),
                       ),
                       Text(
@@ -340,55 +298,20 @@ class _PantallaInventarioState extends State<PantallaInventario> {
                           fontSize: 16,
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      GestureDetector(
-                        onTap: () {
-                          List<Map<String, dynamic>> listaPrecios = [
-                            {
-                              'Etiqueta': 'PRECIO 1',
-                              'Precio': item['Precio1'],
-                              'Minimo': item['Min1'] ?? '1',
-                            },
-                            {
-                              'Etiqueta': 'PRECIO 2',
-                              'Precio': item['Precio2'],
-                              'Minimo': item['Min2'] ?? '0',
-                            },
-                            {
-                              'Etiqueta': 'PRECIO 3',
-                              'Precio': item['Precio3'],
-                              'Minimo': item['Min3'] ?? '0',
-                            },
-                          ];
-                          FichaProductoHelper.compartirFicha(
-                            context: context,
-                            clave: item['Clave'].toString(),
-                            descripcion: item['Descripcion'].toString(),
-                            imagenUrl:
-                                '${widget.baseUrl}/uploads/${item['Foto']}',
-                            precios: listaPrecios,
-                          );
-                        },
-                        child: const Icon(
-                          Icons.share,
-                          color: Color(0xFFD32F2F),
-                          size: 22,
-                        ),
-                      ),
                     ],
                   ),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 5),
                   Text(
                     item['Descripcion'] ?? '',
                     style: const TextStyle(
-                      fontWeight: FontWeight.bold,
+                      fontWeight: FontWeight.w600,
                       fontSize: 14,
                       color: Colors.black87,
                     ),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const Divider(height: 15),
+                  const Divider(),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -412,28 +335,15 @@ class _PantallaInventarioState extends State<PantallaInventario> {
     double stock = double.tryParse(cantidad.toString()) ?? 0;
     return Column(
       children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-          decoration: BoxDecoration(
-            color: stock > 0 ? Colors.blue[50] : Colors.grey[100],
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: stock > 0 ? Colors.blue : Colors.grey),
-          ),
-          child: Text(
-            stock.toStringAsFixed(0),
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 11,
-              color: stock > 0 ? Colors.blue[800] : Colors.grey,
-            ),
-          ),
-        ),
-        const SizedBox(height: 2),
         Text(
-          nombre,
-          style: const TextStyle(fontSize: 8),
-          overflow: TextOverflow.ellipsis,
+          stock.toStringAsFixed(0),
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 12,
+            color: stock > 0 ? Colors.blue[700] : Colors.red[300],
+          ),
         ),
+        Text(nombre, style: const TextStyle(fontSize: 8, color: Colors.grey)),
       ],
     );
   }

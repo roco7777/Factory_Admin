@@ -2,43 +2,36 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'core/constants.dart';
 import 'screens/inventario_screen.dart';
-import 'screens/tienda_screen.dart';
-import 'package:app_movil/services/tienda_service.dart'; //
+import 'screens/admin_login_screen.dart'; // <--- CORREGIDO: Importamos el login correcto
+import 'package:factory_admin/services/tienda_service.dart';
+import 'screens/dashboard_screen.dart';
 
 void main() async {
-  // 1. Inicialización necesaria para usar SharedPreferences antes del runApp
   WidgetsFlutterBinding.ensureInitialized();
-
-  // 2. Leemos la URL guardada en la memoria del teléfono
   final prefs = await SharedPreferences.getInstance();
 
-  // 3. Prioridad:
-  //    Primero busca la URL manual.
-  //    Si no existe, usa la que tengas en AppConfig.baseUrl (tu constante de respaldo).
   String? savedUrl = prefs.getString('custom_api_url');
   String finalUrl = savedUrl ?? AppConfig.baseUrl;
 
-  // 4. Arrancamos pasando la URL definitiva
   runApp(MiNegocioApp(baseUrl: finalUrl));
 }
 
 class MiNegocioApp extends StatelessWidget {
   final String baseUrl;
 
-  // Recibimos la baseUrl dinámica
   const MiNegocioApp({super.key, required this.baseUrl});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Factory Mayoreo',
+      title: 'Factory POS Admin',
       theme: ThemeData(
         primarySwatch: Colors.red,
         useMaterial3: false,
         primaryColor: const Color(0xFFD32F2F),
+        scaffoldBackgroundColor: const Color(0xFFF5F5F5),
       ),
-      // Pasamos la URL al RootHandler
       home: RootHandler(baseUrl: baseUrl),
     );
   }
@@ -46,8 +39,6 @@ class MiNegocioApp extends StatelessWidget {
 
 class RootHandler extends StatefulWidget {
   final String baseUrl;
-
-  // Recibimos la baseUrl aquí también
   const RootHandler({super.key, required this.baseUrl});
 
   @override
@@ -64,17 +55,13 @@ class _RootHandlerState extends State<RootHandler> {
   Future<void> _decidirRuta() async {
     final prefs = await SharedPreferences.getInstance();
 
-    // 1. Intentamos actualizar la URL desde la base de datos
-    // Usamos la URL que ya traemos para preguntar si hay una nueva
+    // 1. Lógica de URL Dinámica
     String? urlNueva = await TiendaService.obtenerUrlRemota(widget.baseUrl);
-
     String urlFinal = widget.baseUrl;
 
     if (urlNueva != null && urlNueva != widget.baseUrl) {
-      // Si la DB dice que la URL cambió, la guardamos y actualizamos
       await prefs.setString('custom_api_url', urlNueva);
       urlFinal = urlNueva;
-      debugPrint("--- URL AUTO-ACTUALIZADA: $urlFinal ---");
     }
 
     final String? adminUser = prefs.getString('saved_user');
@@ -82,20 +69,23 @@ class _RootHandlerState extends State<RootHandler> {
 
     if (!mounted) return;
 
-    // 2. Navegamos usando la urlFinal (que puede ser la misma o la nueva)
+    // 2. Lógica de Ruteo
     if (adminUser != null && adminRol != null) {
+      // Si ya tiene sesión --> Va al Inventario/Panel
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => DashboardScreen(baseUrl: urlFinal),
+          //PantallaInventario(userRole: adminRol, baseUrl: urlFinal),
+        ),
+      );
+    } else {
+      // Si NO tiene sesión --> Va al Login de ADMINISTRADOR
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
           builder: (context) =>
-              PantallaInventario(userRole: adminRol, baseUrl: urlFinal),
-        ),
-      );
-    } else {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (context) => TiendaScreen(baseUrl: urlFinal),
+              AdminLoginScreen(baseUrl: urlFinal), // <--- USO CORRECTO
         ),
       );
     }
@@ -103,7 +93,6 @@ class _RootHandlerState extends State<RootHandler> {
 
   @override
   Widget build(BuildContext context) {
-    // Pantalla de carga mientras se decide la ruta
     return const Scaffold(
       body: Center(child: CircularProgressIndicator(color: Color(0xFFD32F2F))),
     );
