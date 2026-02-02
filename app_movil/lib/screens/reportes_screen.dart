@@ -43,7 +43,7 @@ class _PantallaReportesState extends State<PantallaReportes> {
         });
       }
     } catch (e) {
-      print(e);
+      debugPrint(e.toString());
     }
   }
 
@@ -51,14 +51,26 @@ class _PantallaReportesState extends State<PantallaReportes> {
   Widget build(BuildContext context) {
     String hoy = DateTime.now().toString().split(' ')[0];
     return Scaffold(
+      backgroundColor: fondoGris,
       appBar: AppBar(
-        title: const Text("Corte en Vivo"),
-        backgroundColor: Colors.indigo[800],
+        title: const Text(
+          "Corte en Vivo",
+          style: TextStyle(fontWeight: FontWeight.w300),
+        ),
+        backgroundColor: azulPrimario,
+        elevation: 0,
+        centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded),
+            onPressed: _cargarReporte,
+          ),
+        ],
       ),
-      backgroundColor: Colors.grey[200],
       body: cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: CircularProgressIndicator(color: azulPrimario))
           : RefreshIndicator(
+              color: azulPrimario,
               onRefresh: _cargarReporte,
               child: _UIReporteVivo(
                 datos: datos,
@@ -83,9 +95,9 @@ class _UIReporteVivo extends StatelessWidget {
     required this.baseUrl,
     required this.fechaHoy,
   });
+
   @override
   Widget build(BuildContext context) {
-    // 1. Extraemos los valores del mapa global
     double tE =
         double.tryParse(datos['global']?['TotalEfectivo']?.toString() ?? '0') ??
         0;
@@ -96,7 +108,6 @@ class _UIReporteVivo extends StatelessWidget {
         double.tryParse(datos['global']?['TotalBancario']?.toString() ?? '0') ??
         0;
 
-    // 2. Calculamos los Retiros Globales (sumando los retiros de todas las cajas)
     double totalRetirosGlobal = 0;
     sucursales.forEach((key, cajas) {
       for (var caja in cajas) {
@@ -105,72 +116,116 @@ class _UIReporteVivo extends StatelessWidget {
       }
     });
 
-    // 3. Calculamos el Efectivo Neto (Lo que queda en físico)
     double efectivoNeto = tE - totalRetirosGlobal;
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(12),
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.all(16),
       child: Column(
         children: [
-          // Card de Total Empresa
-          Card(
-            color: Colors.indigo[900],
-            elevation: 4,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(15),
+          // --- PANEL DE CONTROL DE EFECTIVO (HEADLINE) ---
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: azulPrimario,
+              borderRadius: BorderRadius.circular(25),
+              boxShadow: [
+                BoxShadow(
+                  color: azulPrimario.withOpacity(0.3),
+                  blurRadius: 10,
+                  offset: const Offset(0, 5),
+                ),
+              ],
             ),
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                children: [
-                  const Text(
-                    "TOTAL EMPRESA ACTUAL (BRUTO)",
-                    style: TextStyle(color: Colors.white70, fontSize: 11),
+            child: Column(
+              children: [
+                const Text(
+                  "VENTA BRUTA TOTAL (HOY)",
+                  style: TextStyle(
+                    color: Colors.white60,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.2,
                   ),
-                  Text(
-                    formatCurrency(tE + tT + tB),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                    ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  formatCurrency(tE + tT + tB),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 32,
+                    fontWeight: FontWeight.bold,
                   ),
-                  const Divider(color: Colors.white24, height: 20),
-
-                  // --- NUEVA SECCIÓN DE EFECTIVO NETO ---
-                  _fila("Efectivo Total:", tE, Colors.white70),
-                  _fila(
-                    "Retiros Totales:",
-                    totalRetirosGlobal,
-                    Colors.redAccent,
-                  ),
-                  const SizedBox(height: 5),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      vertical: 8,
-                      horizontal: 10,
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 15),
+                  child: Divider(color: Colors.white12, height: 1),
+                ),
+                // Fila de Efectivo Neto Destacada
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "EFECTIVO NETO",
+                          style: TextStyle(
+                            color: verdeExito,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                        Text(
+                          "Disponible en cajas",
+                          style: TextStyle(color: Colors.white38, fontSize: 10),
+                        ),
+                      ],
                     ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
+                    Text(
+                      formatCurrency(efectivoNeto),
+                      style: const TextStyle(
+                        color: verdeExito,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
-                    child: _fila(
-                      "EFECTIVO NETO:",
-                      efectivoNeto,
-                      Colors.greenAccent,
-                    ),
-                  ),
-                  const Divider(color: Colors.white24, height: 20),
-
-                  // ---------------------------------------
-                  _fila("Tarjeta:", tT, Colors.white),
-                  _fila("Bancario:", tB, Colors.white),
-                ],
-              ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                // Desglose rápido
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _miniData("Efectivo", tE),
+                    _miniData("Retiros", totalRetirosGlobal, isNegative: true),
+                    _miniData("Tarjetas", tT),
+                  ],
+                ),
+              ],
             ),
           ),
+
+          const SizedBox(height: 25),
+
+          // --- LISTADO DE SUCURSALES ---
+          Row(
+            children: [
+              Container(width: 4, height: 15, color: azulAcento),
+              const SizedBox(width: 10),
+              const Text(
+                "ESTADO POR SUCURSAL",
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                  color: Colors.black54,
+                  letterSpacing: 1.1,
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 15),
-          // Listado de Sucursales
+
           ...sucursales.entries.map((entry) {
             double totalSuc = entry.value.fold(
               0,
@@ -178,19 +233,38 @@ class _UIReporteVivo extends StatelessWidget {
                   sum +
                   (double.tryParse(item['VentaTotal']?.toString() ?? '0') ?? 0),
             );
-            return Card(
+            return Container(
               margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(15),
+                border: Border.all(color: grisBordes),
+              ),
               child: ExpansionTile(
-                leading: const Icon(Icons.store, color: Colors.indigo),
+                iconColor: azulAcento,
+                collapsedIconColor: Colors.grey,
+                leading: const CircleAvatar(
+                  backgroundColor: fondoGris,
+                  child: Icon(
+                    Icons.storefront_rounded,
+                    color: azulPrimario,
+                    size: 20,
+                  ),
+                ),
                 title: Text(
                   entry.key,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                    color: azulPrimario,
+                  ),
                 ),
                 trailing: Text(
                   formatCurrency(totalSuc),
                   style: const TextStyle(
-                    color: Colors.green,
+                    color: azulAcento,
                     fontWeight: FontWeight.bold,
+                    fontSize: 15,
                   ),
                 ),
                 children: entry.value
@@ -204,58 +278,77 @@ class _UIReporteVivo extends StatelessWidget {
     );
   }
 
+  Widget _miniData(String label, double valor, {bool isNegative = false}) {
+    return Column(
+      children: [
+        Text(
+          formatCurrency(valor),
+          style: TextStyle(
+            color: isNegative ? Colors.red[300] : Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 14,
+          ),
+        ),
+        Text(
+          label,
+          style: const TextStyle(color: Colors.white38, fontSize: 10),
+        ),
+      ],
+    );
+  }
+
   Widget _buildCajaDetalle(BuildContext context, dynamic c) {
-    return Padding(
-      padding: const EdgeInsets.all(10),
-      child: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: Colors.grey[50],
-          border: Border.all(color: Colors.grey[200]!),
-        ),
-        child: Column(
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  "Caja ${c['NumCaja']}",
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                  ),
+    return Container(
+      padding: const EdgeInsets.all(15),
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: fondoGris.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                "CAJA ${c['NumCaja']}",
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                  color: azulAcento,
                 ),
-                Text(
-                  formatCurrency(c['VentaTotal']),
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.indigo,
-                  ),
+              ),
+              Text(
+                formatCurrency(c['VentaTotal']),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: azulPrimario,
                 ),
-              ],
-            ),
-            _fila("Efec:", c['Efectivo'], Colors.black87),
-            _fila("Tarj:", c['Tarjeta'], Colors.black87),
-            _fila("Banc:", c['Bancario'], Colors.black87),
-            _fila(
-              "Retiros:",
-              c['Retiros'] ?? 0,
-              Colors.red,
-              onTap: () {
-                showDialog(
-                  context: context,
-                  builder: (context) => DialogoRetiros(
-                    baseUrl: baseUrl,
-                    numSuc: c['NumSuc'],
-                    numCaja: c['NumCaja'],
-                    fIni: fechaHoy,
-                    fFin: fechaHoy,
-                  ),
-                );
-              },
-            ),
-          ],
-        ),
+              ),
+            ],
+          ),
+          const Divider(height: 20),
+          _fila("Venta Efectivo:", c['Efectivo'], azulPrimario),
+          _fila("Venta Tarjeta:", c['Tarjeta'], azulPrimario),
+          _fila("Otros (Banc):", c['Bancario'], azulPrimario),
+          _fila(
+            "Retiros Realizados:",
+            c['Retiros'] ?? 0,
+            Colors.red[700]!,
+            onTap: () {
+              showDialog(
+                context: context,
+                builder: (context) => DialogoRetiros(
+                  baseUrl: baseUrl,
+                  numSuc: c['NumSuc'],
+                  numCaja: c['NumCaja'],
+                  fIni: fechaHoy,
+                  fFin: fechaHoy,
+                ),
+              );
+            },
+          ),
+        ],
       ),
     );
   }
@@ -263,7 +356,7 @@ class _UIReporteVivo extends StatelessWidget {
   Widget _fila(String l, dynamic v, Color c, {VoidCallback? onTap}) {
     double m = double.tryParse(v.toString()) ?? 0;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
+      padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -275,7 +368,7 @@ class _UIReporteVivo extends StatelessWidget {
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.bold,
-                color: (m > 0 && onTap != null) ? Colors.blue : c,
+                color: (m > 0 && onTap != null) ? Colors.blue[700] : c,
                 decoration: (m > 0 && onTap != null)
                     ? TextDecoration.underline
                     : null,

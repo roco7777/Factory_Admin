@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'dart:convert';
 import '../core/constants.dart';
 import '../widgets/dialogo_retiros.dart';
 
@@ -65,18 +65,33 @@ class _PantallaHistoricoState extends State<PantallaHistorico>
   Widget build(BuildContext context) {
     String fIni = fechaSeleccionada.toString().split(' ')[0];
     return Scaffold(
+      backgroundColor: fondoGris,
       appBar: AppBar(
-        title: const Text("Venta Diaria"),
-        backgroundColor: Colors.blueGrey[800],
+        title: const Text(
+          "Ventas e Histórico",
+          style: TextStyle(fontWeight: FontWeight.w300),
+        ),
+        backgroundColor: azulPrimario,
+        elevation: 0,
         actions: [
           IconButton(
-            icon: const Icon(Icons.edit_calendar),
+            icon: const Icon(Icons.calendar_month_rounded),
             onPressed: () async {
               DateTime? p = await showDatePicker(
                 context: context,
                 initialDate: fechaSeleccionada,
                 firstDate: DateTime(2020),
                 lastDate: DateTime.now(),
+                builder: (context, child) {
+                  return Theme(
+                    data: Theme.of(context).copyWith(
+                      colorScheme: const ColorScheme.light(
+                        primary: azulPrimario,
+                      ),
+                    ),
+                    child: child!,
+                  );
+                },
               );
               if (p != null) {
                 setState(() => fechaSeleccionada = p);
@@ -87,6 +102,8 @@ class _PantallaHistoricoState extends State<PantallaHistorico>
         ],
         bottom: TabBar(
           controller: _tabController,
+          indicatorColor: Colors.white,
+          indicatorWeight: 3,
           tabs: const [
             Tab(text: "Día"),
             Tab(text: "Semana"),
@@ -95,7 +112,7 @@ class _PantallaHistoricoState extends State<PantallaHistorico>
         ),
       ),
       body: cargando
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: CircularProgressIndicator(color: azulPrimario))
           : _UIReporteHistorico(
               datos: datos,
               sucursales: sucursalesAgrupadas,
@@ -137,65 +154,99 @@ class _UIReporteHistorico extends StatelessWidget {
         0;
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(16),
       child: Column(
         children: [
-          Card(
-            color: Colors.indigo[900],
-            elevation: 4,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(15),
+          // --- CARD RESUMEN GLOBAL (ESTILO PROFESIONAL) ---
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: azulPrimario,
+              borderRadius: BorderRadius.circular(25),
+              boxShadow: [
+                BoxShadow(
+                  color: azulPrimario.withOpacity(0.3),
+                  blurRadius: 10,
+                  offset: const Offset(0, 5),
+                ),
+              ],
             ),
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                children: [
-                  Text(
-                    datos['periodo'] ?? "RESUMEN",
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
-                    ),
+            child: Column(
+              children: [
+                Text(
+                  datos['periodo']?.toString().toUpperCase() ??
+                      "RESUMEN DE OPERACIONES",
+                  style: const TextStyle(
+                    color: Colors.white60,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.2,
                   ),
-                  Text(
-                    formatCurrency(tE + tT + tB),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                    ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  formatCurrency(tE + tT + tB),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 32,
+                    fontWeight: FontWeight.bold,
                   ),
-                  const Text(
-                    "GRAN TOTAL",
-                    style: TextStyle(color: Colors.greenAccent, fontSize: 9),
+                ),
+                const Text(
+                  "VENTA BRUTA TOTAL",
+                  style: TextStyle(color: Colors.white54, fontSize: 10),
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 15),
+                  child: Divider(color: Colors.white12),
+                ),
+                Text(
+                  formatCurrency(tEN),
+                  style: const TextStyle(
+                    color: Colors.amberAccent,
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
                   ),
-                  const Divider(color: Colors.white24, height: 20),
-                  Text(
-                    formatCurrency(tEN),
-                    style: const TextStyle(
-                      color: Colors.yellowAccent,
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                    ),
+                ),
+                const Text(
+                  "EFECTIVO NETO A ENTREGAR",
+                  style: TextStyle(
+                    color: Colors.amberAccent,
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
                   ),
-                  const Text(
-                    "EFECTIVO NETO (ENTREGAR)",
-                    style: TextStyle(
-                      color: Colors.yellowAccent,
-                      fontSize: 9,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const Divider(color: Colors.white24, height: 25),
-                  _fila("Efectivo:", tE, Colors.white),
-                  _fila("Tarjeta:", tT, Colors.white),
-                  _fila("Bancario:", tB, Colors.white70),
-                ],
-              ),
+                ),
+                const SizedBox(height: 20),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _itemHeader("Efectivo", tE),
+                    _itemHeader("Tarjeta", tT),
+                    _itemHeader("Bancario", tB),
+                  ],
+                ),
+              ],
             ),
           ),
+          const SizedBox(height: 25),
+
+          // --- DESGLOSE POR SUCURSAL ---
+          Row(
+            children: [
+              Container(width: 4, height: 15, color: azulAcento),
+              const SizedBox(width: 10),
+              const Text(
+                "DESGLOSE POR SUCURSAL",
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                  color: Colors.black54,
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 15),
+
           ...sucursales.entries.map((entry) {
             double totalSuc = entry.value.fold(
               0,
@@ -203,19 +254,38 @@ class _UIReporteHistorico extends StatelessWidget {
                   sum +
                   (double.tryParse(item['VentaTotal']?.toString() ?? '0') ?? 0),
             );
-            return Card(
+            return Container(
               margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(15),
+                border: Border.all(color: grisBordes),
+              ),
               child: ExpansionTile(
-                leading: const Icon(Icons.store, color: Colors.indigo),
+                iconColor: azulAcento,
+                collapsedIconColor: Colors.grey,
+                leading: const CircleAvatar(
+                  backgroundColor: fondoGris,
+                  child: Icon(
+                    Icons.storefront_rounded,
+                    color: azulPrimario,
+                    size: 20,
+                  ),
+                ),
                 title: Text(
                   entry.key,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                    color: azulPrimario,
+                  ),
                 ),
                 trailing: Text(
                   formatCurrency(totalSuc),
                   style: const TextStyle(
-                    color: Colors.green,
+                    color: verdeExito,
                     fontWeight: FontWeight.bold,
+                    fontSize: 15,
                   ),
                 ),
                 children: entry.value
@@ -229,76 +299,116 @@ class _UIReporteHistorico extends StatelessWidget {
     );
   }
 
-  Widget _buildDetalleHisto(BuildContext context, dynamic c) {
-    return Padding(
-      padding: const EdgeInsets.all(10),
-      child: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: Colors.grey[50],
-          border: Border.all(color: Colors.grey[200]!),
+  Widget _itemHeader(String label, double valor) {
+    return Column(
+      children: [
+        Text(
+          formatCurrency(valor),
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: 14,
+          ),
         ),
-        child: Column(
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  "Caja ${c['NumCaja']}",
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                  ),
+        Text(
+          label,
+          style: const TextStyle(color: Colors.white38, fontSize: 10),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDetalleHisto(BuildContext context, dynamic c) {
+    return Container(
+      padding: const EdgeInsets.all(15),
+      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: fondoGris.withOpacity(0.5),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                "CAJA ${c['NumCaja']}",
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                  color: azulAcento,
                 ),
-                Text(
-                  formatCurrency(c['VentaTotal']),
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Colors.indigo,
-                  ),
+              ),
+              Text(
+                formatCurrency(c['VentaTotal']),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: azulPrimario,
                 ),
-              ],
+              ),
+            ],
+          ),
+          const Divider(height: 20),
+          _fila("Efectivo:", c['Efectivo'], azulPrimario),
+          _fila("Tarjetas:", c['Tarjeta'], azulPrimario),
+          _fila("Depósitos:", c['Bancario'], azulPrimario),
+          _fila(
+            "Retiros de Caja:",
+            c['Retiros'] ?? 0,
+            Colors.red[700]!,
+            onTap: () {
+              showDialog(
+                context: context,
+                builder: (context) => DialogoRetiros(
+                  baseUrl: baseUrl,
+                  numSuc: c['NumSuc'],
+                  numCaja: c['NumCaja'],
+                  fIni: c['FechaFila'] ?? fechaIni,
+                  fFin: c['FechaFila'] ?? fechaIni,
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: azulPrimario.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(5),
             ),
-            _fila("Efec:", c['Efectivo'], Colors.black87),
-            _fila("Tarj:", c['Tarjeta'], Colors.black87),
-            _fila("Banc:", c['Bancario'], Colors.black87),
-            _fila(
-              "Retiros:",
-              c['Retiros'] ?? 0,
-              Colors.red,
-              onTap: () {
-                showDialog(
-                  context: context,
-                  builder: (context) => DialogoRetiros(
-                    baseUrl: baseUrl,
-                    numSuc: c['NumSuc'],
-                    numCaja: c['NumCaja'],
-                    fIni: c['FechaFila'] ?? fechaIni,
-                    fFin: c['FechaFila'] ?? fechaIni,
-                  ),
-                );
-              },
-            ),
-            const Divider(),
-            _fila(
+            child: _fila(
               "EFECTIVO NETO:",
               c['EfectivoNeto'] ?? 0,
-              Colors.indigo[900]!,
+              azulPrimario,
+              bold: true,
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _fila(String l, dynamic v, Color c, {VoidCallback? onTap}) {
+  Widget _fila(
+    String l,
+    dynamic v,
+    Color c, {
+    VoidCallback? onTap,
+    bool bold = false,
+  }) {
     double m = double.tryParse(v.toString()) ?? 0;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
+      padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(l, style: TextStyle(fontSize: 13, color: c)),
+          Text(
+            l,
+            style: TextStyle(
+              fontSize: 13,
+              color: c,
+              fontWeight: bold ? FontWeight.bold : FontWeight.normal,
+            ),
+          ),
           GestureDetector(
             onTap: (m > 0) ? onTap : null,
             child: Text(
@@ -306,7 +416,7 @@ class _UIReporteHistorico extends StatelessWidget {
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.bold,
-                color: (m > 0 && onTap != null) ? Colors.blue : c,
+                color: (m > 0 && onTap != null) ? Colors.blue[700] : c,
                 decoration: (m > 0 && onTap != null)
                     ? TextDecoration.underline
                     : null,

@@ -3,7 +3,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import '../core/constants.dart';
-import '../screens/ficha_producto_helper.dart'; // Importante: que la ruta sea correcta
+import '../screens/ficha_producto_helper.dart';
+import '../core/security_service.dart';
 
 class EdicionProductoScreen extends StatefulWidget {
   final String clave;
@@ -185,8 +186,6 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
         body: json.encode(payload),
       );
       if (response.statusCode == 200) Navigator.pop(context, true);
-    } catch (e) {
-      print("Error al actualizar producto: $e");
     } finally {
       setState(() => isSaving = false);
     }
@@ -196,6 +195,8 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
     TextEditingController ctrl,
     String label, {
     bool enabled = true,
+    IconData? icon,
+    bool obscureText = false,
   }) => Expanded(
     child: TextFormField(
       controller: ctrl,
@@ -203,7 +204,12 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
       decoration: InputDecoration(
         labelText: label,
-        border: const OutlineInputBorder(),
+        prefixIcon: icon != null
+            ? Icon(icon, size: 20, color: azulAcento)
+            : null,
+        filled: true,
+        fillColor: Colors.white,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         isDense: true,
       ),
       onTap: () {
@@ -228,13 +234,13 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
             double ut = p - c;
             double por = c > 0 ? (ut / c) * 100 : 0;
             return Padding(
-              padding: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.only(top: 5, bottom: 10, left: 5),
               child: Text(
                 "Ganancia: ${formatCurrency(ut)} (${por.toStringAsFixed(1)}%)",
                 style: TextStyle(
-                  fontSize: 11,
+                  fontSize: 12,
                   fontWeight: FontWeight.bold,
-                  color: ut >= 0 ? Colors.green : Colors.red,
+                  color: ut >= 0 ? verdeExito : Colors.red,
                 ),
               ),
             );
@@ -246,139 +252,115 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final can = widget.userRole == 'Administrador';
+    // --- SEGURIDAD PLUS: CONSULTA DE PERMISOS ---
+    final bool puedeVerCostos = SecurityService.tienePermiso('inv_ver_costos');
+    final bool puedeEditarPrecios = SecurityService.tienePermiso(
+      'inv_editar_precios',
+    );
+    final bool puedeEditarBasico = SecurityService.tienePermiso(
+      'inv_editar_basico',
+    );
+    final bool puedeEditarStock = SecurityService.tienePermiso(
+      'inv_editar_stock',
+    );
+
+    // El permiso 'can' ahora es dinámico basado en permisos o rol
+    final bool esSuper = widget.userRole == 'Superusuario';
+    final bool can =
+        esSuper || SecurityService.tienePermiso('inv_editar_basico');
+
     return Scaffold(
+      backgroundColor: fondoGris,
       appBar: AppBar(
-        title: Text("Editar: ${widget.clave}"),
-        backgroundColor: const Color(0xFFD32F2F),
+        title: Text(
+          "Editar: ${widget.clave}",
+          style: const TextStyle(fontWeight: FontWeight.w300),
+        ),
+        backgroundColor: azulPrimario,
+        elevation: 0,
         actions: [
+          // Solo mostramos el botón de guardar si tiene permiso de edición
           if (can && !isLoading)
-            IconButton(icon: const Icon(Icons.save), onPressed: _updateProduct),
+            IconButton(
+              icon: const Icon(Icons.check_circle_outline, size: 28),
+              onPressed: _updateProduct,
+            ),
         ],
       ),
       body: isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: CircularProgressIndicator(color: azulPrimario))
           : Stack(
               children: [
                 SingleChildScrollView(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(20),
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // --- SECCIÓN DE FOTO (Bloqueada si no puede editar básico) ---
                       Center(
-                        child: Stack(
-                          alignment: Alignment.topRight,
-                          children: [
-                            GestureDetector(
-                              onTap: can ? () => _mostrarMenuFoto() : null,
-                              child: Stack(
-                                alignment: Alignment.bottomRight,
-                                children: [
-                                  Container(
-                                    width: 140,
-                                    height: 140,
-                                    decoration: BoxDecoration(
-                                      color: Colors.grey[200],
-                                      borderRadius: BorderRadius.circular(15),
-                                      border: Border.all(
-                                        color: Colors.blue,
-                                        width: 2,
-                                      ),
-                                    ),
-                                    child: fotoActual != null
-                                        ? ClipRRect(
-                                            borderRadius: BorderRadius.circular(
-                                              12,
-                                            ),
-                                            child: Image.network(
-                                              '${widget.baseUrl}/uploads/$fotoActual?t=${DateTime.now().millisecondsSinceEpoch}',
-                                              fit: BoxFit.cover,
-                                            ),
-                                          )
-                                        : const Icon(
-                                            Icons.add_a_photo,
-                                            size: 50,
-                                            color: Colors.blue,
-                                          ),
+                        child: GestureDetector(
+                          onTap: puedeEditarBasico
+                              ? () => _mostrarMenuFoto()
+                              : null,
+                          child: Stack(
+                            alignment: Alignment.bottomRight,
+                            children: [
+                              Container(
+                                width: 160,
+                                height: 160,
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(25),
+                                  border: Border.all(
+                                    color: azulPrimario.withOpacity(0.2),
+                                    width: 2,
                                   ),
-                                  if (can)
-                                    const CircleAvatar(
-                                      backgroundColor: Colors.blue,
-                                      radius: 18,
-                                      child: Icon(
-                                        Icons.edit,
-                                        color: Colors.white,
-                                        size: 18,
-                                      ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withOpacity(0.05),
+                                      blurRadius: 10,
                                     ),
-                                ],
-                              ),
-                            ),
-                            if (fotoActual != null)
-                              Positioned(
-                                top: -5,
-                                right: -5,
-                                child: IconButton(
-                                  icon: const CircleAvatar(
-                                    backgroundColor: Colors.green,
-                                    radius: 16,
-                                    child: Icon(
-                                      Icons.share,
-                                      color: Colors.white,
-                                      size: 16,
-                                    ),
-                                  ),
-                                  onPressed: () {
-                                    List<Map<String, dynamic>> listaPrecios = [
-                                      {
-                                        'Etiqueta': 'PRECIO 1',
-                                        'Precio': p1Ctrl.text,
-                                        'Minimo': m1Ctrl.text,
-                                      },
-                                      {
-                                        'Etiqueta': 'PRECIO 2',
-                                        'Precio': p2Ctrl.text,
-                                        'Minimo': m2Ctrl.text,
-                                      },
-                                      {
-                                        'Etiqueta': 'PRECIO 3',
-                                        'Precio': p3Ctrl.text,
-                                        'Minimo': m3Ctrl.text,
-                                      },
-                                    ];
-                                    FichaProductoHelper.compartirFicha(
-                                      context: context,
-                                      clave: widget.clave,
-                                      descripcion: descCtrl.text,
-                                      imagenUrl:
-                                          '${widget.baseUrl}/uploads/$fotoActual',
-                                      precios: listaPrecios,
-                                    );
-                                  },
+                                  ],
                                 ),
+                                child: fotoActual != null
+                                    ? ClipRRect(
+                                        borderRadius: BorderRadius.circular(23),
+                                        child: Image.network(
+                                          '${widget.baseUrl}/uploads/$fotoActual?t=${DateTime.now().millisecondsSinceEpoch}',
+                                          fit: BoxFit.cover,
+                                        ),
+                                      )
+                                    : const Icon(
+                                        Icons.add_a_photo_outlined,
+                                        size: 50,
+                                        color: azulAcento,
+                                      ),
                               ),
-                          ],
+                              if (puedeEditarBasico)
+                                CircleAvatar(
+                                  backgroundColor: azulPrimario,
+                                  radius: 20,
+                                  child: const Icon(
+                                    Icons.camera_alt,
+                                    color: Colors.white,
+                                    size: 20,
+                                  ),
+                                ),
+                            ],
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 30),
+
+                      // --- INFORMACIÓN BÁSICA ---
+                      _sectionTitle("INFORMACIÓN BÁSICA"),
                       TextFormField(
                         controller: descCtrl,
-                        enabled: can,
+                        enabled: puedeEditarBasico, // Bloqueo granular
                         textCapitalization: TextCapitalization.characters,
-                        decoration: const InputDecoration(
-                          labelText: "Descripción",
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      const SizedBox(height: 15),
-                      TextFormField(
-                        initialValue: widget.clave,
-                        readOnly: true,
-                        decoration: const InputDecoration(
-                          labelText: "Clave Sistema",
-                          border: OutlineInputBorder(),
-                          fillColor: Color(0xFFFFF9C4),
-                          filled: true,
-                          prefixIcon: Icon(Icons.vpn_key),
+                        decoration: _inputStyle(
+                          "Descripción del Producto",
+                          Icons.description_outlined,
                         ),
                       ),
                       const SizedBox(height: 15),
@@ -386,176 +368,221 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
                         children: [
                           _internalNumericField(
                             cbCtrl,
-                            "Cód. Barras",
-                            enabled: can,
+                            "Código Barras",
+                            enabled: puedeEditarBasico,
+                            icon: Icons.qr_code_2,
                           ),
                           const SizedBox(width: 10),
                           Expanded(
                             child: TextFormField(
                               controller: claveProCtrl,
-                              enabled: can,
-                              decoration: const InputDecoration(
-                                labelText: "Clave Proveedor",
-                                border: OutlineInputBorder(),
-                                isDense: true,
-                                prefixIcon: Icon(Icons.inventory_2),
+                              enabled: puedeEditarBasico,
+                              decoration: _inputStyle(
+                                "Clave Proveedor",
+                                Icons.tag,
                               ),
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 15),
+                      const SizedBox(height: 30),
+
+                      // --- COSTOS Y PRECIOS ---
+                      _sectionTitle("COSTOS Y RENTABILIDAD"),
                       Row(
                         children: [
+                          // COSTO: Protegido con obscureText si no tiene permiso de ver
                           _internalNumericField(
                             costoCtrl,
-                            "Costo",
-                            enabled: can,
+                            puedeVerCostos
+                                ? "Costo de Compra"
+                                : "COSTO PROTEGIDO",
+                            enabled: puedeVerCostos && puedeEditarBasico,
+                            obscureText:
+                                !puedeVerCostos, // <--- Muestra asteriscos si no tiene permiso
+                            icon: puedeVerCostos
+                                ? Icons.payments_outlined
+                                : Icons.lock_outline,
                           ),
                           const SizedBox(width: 10),
                           _internalNumericField(
                             pzasCajaCtrl,
-                            "Pzas/Caja",
-                            enabled: can,
+                            "Pzas por Caja",
+                            enabled: puedeEditarBasico,
+                            icon: Icons.inventory_2_outlined,
                           ),
                         ],
                       ),
-                      const Divider(height: 30),
-                      Row(
-                        children: [
-                          _internalNumericField(
-                            p1Ctrl,
-                            "Precio 1",
-                            enabled: can,
-                          ),
-                          const SizedBox(width: 8),
-                          _internalNumericField(m1Ctrl, "Min 1", enabled: can),
-                        ],
-                      ),
-                      _internalUtilidad(p1Ctrl, costoCtrl),
-                      Row(
-                        children: [
-                          _internalNumericField(
-                            p2Ctrl,
-                            "Precio 2",
-                            enabled: can,
-                          ),
-                          const SizedBox(width: 8),
-                          _internalNumericField(m2Ctrl, "Min 2", enabled: can),
-                        ],
-                      ),
-                      _internalUtilidad(p2Ctrl, costoCtrl),
-                      Row(
-                        children: [
-                          _internalNumericField(
-                            p3Ctrl,
-                            "Precio 3",
-                            enabled: can,
-                          ),
-                          const SizedBox(width: 8),
-                          _internalNumericField(m3Ctrl, "Min 3", enabled: can),
-                        ],
-                      ),
-                      _internalUtilidad(p3Ctrl, costoCtrl),
-                      const Divider(height: 30),
-                      const Text(
-                        "Existencias por Almacén",
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 10),
-                      for (int i = 1; i <= 5; i++)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          child: Row(
-                            children: [
-                              SizedBox(
-                                width: 80,
-                                child: Text(
-                                  widget.sucursalNames[i - 1],
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                              _internalNumericField(
-                                vCtrls[i]!,
-                                "Pzas",
-                                enabled: can,
-                              ),
-                              const SizedBox(width: 5),
-                              _internalNumericField(
-                                bCtrls[i]!,
-                                "Bodega",
-                                enabled: can,
-                              ),
-                              Switch(
-                                value: activoStocks[i]!,
-                                onChanged: can
-                                    ? (val) =>
-                                          setState(() => activoStocks[i] = val)
-                                    : null,
-                              ),
-                            ],
-                          ),
+                      const SizedBox(height: 20),
+
+                      _priceRow(p1Ctrl, m1Ctrl, "Precio 1", puedeEditarPrecios),
+                      if (puedeVerCostos) _internalUtilidad(p1Ctrl, costoCtrl),
+
+                      _priceRow(p2Ctrl, m2Ctrl, "Precio 2", puedeEditarPrecios),
+                      if (puedeVerCostos) _internalUtilidad(p2Ctrl, costoCtrl),
+
+                      _priceRow(p3Ctrl, m3Ctrl, "Precio 3", puedeEditarPrecios),
+                      if (puedeVerCostos) _internalUtilidad(p3Ctrl, costoCtrl),
+
+                      const SizedBox(height: 30),
+
+                      // --- EXISTENCIAS ---
+                      _sectionTitle("CONTROL DE EXISTENCIAS"),
+                      Container(
+                        padding: const EdgeInsets.all(15),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: grisBordes),
                         ),
+                        child: Column(
+                          children: [
+                            // Solo se pueden editar si tiene el permiso inv_editar_stock
+                            for (int i = 1; i <= 5; i++)
+                              _buildStockRow(i, puedeEditarStock),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 100),
                     ],
                   ),
                 ),
-                if (isSaving)
-                  Container(
-                    color: Colors.black45,
-                    child: const Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          CircularProgressIndicator(color: Colors.white),
-                          SizedBox(height: 10),
-                          Text(
-                            "Guardando cambios...",
-                            style: TextStyle(color: Colors.white),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+                if (isSaving) _loadingOverlay(),
               ],
             ),
     );
   }
 
+  Widget _sectionTitle(String text) => Padding(
+    padding: const EdgeInsets.only(bottom: 15, left: 5),
+    child: Text(
+      text,
+      style: const TextStyle(
+        fontWeight: FontWeight.bold,
+        fontSize: 12,
+        color: azulAcento,
+        letterSpacing: 1.2,
+      ),
+    ),
+  );
+
+  InputDecoration _inputStyle(String label, IconData icon) => InputDecoration(
+    labelText: label,
+    prefixIcon: Icon(icon, color: azulAcento),
+    filled: true,
+    fillColor: Colors.white,
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+    isDense: true,
+  );
+
+  Widget _priceRow(
+    TextEditingController p,
+    TextEditingController m,
+    String label,
+    bool can,
+  ) => Row(
+    children: [
+      _internalNumericField(p, label, enabled: can, icon: Icons.attach_money),
+      const SizedBox(width: 10),
+      _internalNumericField(m, "Mínimo", enabled: can),
+    ],
+  );
+
+  Widget _buildStockRow(int i, bool can) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 70,
+            child: Text(
+              widget.sucursalNames[i - 1],
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+            ),
+          ),
+          _internalNumericField(vCtrls[i]!, "Pzas", enabled: can),
+          const SizedBox(width: 5),
+          _internalNumericField(bCtrls[i]!, "Bodega", enabled: can),
+          Switch(
+            value: activoStocks[i]!,
+            activeColor: azulPrimario,
+            onChanged: can
+                ? (val) => setState(() => activoStocks[i] = val)
+                : null,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _loadingOverlay() => Container(
+    color: azulPrimario.withOpacity(0.8),
+    child: const Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          CircularProgressIndicator(color: Colors.white),
+          SizedBox(height: 15),
+          Text(
+            "Sincronizando con el servidor...",
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          ),
+        ],
+      ),
+    ),
+  );
+
   void _mostrarMenuFoto() {
     showModalBottomSheet(
       context: context,
+      backgroundColor: fondoGris,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(25)),
+      ),
       builder: (c) => SafeArea(
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.camera_alt, color: Colors.blue),
-              title: const Text('Cámara'),
-              onTap: () {
-                Navigator.pop(c);
-                _seleccionarFoto(ImageSource.camera);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library, color: Colors.blue),
-              title: const Text('Galería'),
-              onTap: () {
-                Navigator.pop(c);
-                _seleccionarFoto(ImageSource.gallery);
-              },
-            ),
-            if (fotoActual != null)
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          child: Wrap(
+            children: [
               ListTile(
-                leading: const Icon(Icons.delete, color: Colors.red),
-                title: const Text('Eliminar Foto'),
+                leading: const Icon(
+                  Icons.camera_alt_rounded,
+                  color: azulAcento,
+                ),
+                title: const Text('Tomar Fotografía'),
                 onTap: () {
                   Navigator.pop(c);
-                  _eliminarFoto();
+                  _seleccionarFoto(ImageSource.camera);
                 },
               ),
-          ],
+              ListTile(
+                leading: const Icon(
+                  Icons.photo_library_rounded,
+                  color: azulAcento,
+                ),
+                title: const Text('Elegir de Galería'),
+                onTap: () {
+                  Navigator.pop(c);
+                  _seleccionarFoto(ImageSource.gallery);
+                },
+              ),
+              if (fotoActual != null)
+                ListTile(
+                  leading: const Icon(
+                    Icons.delete_sweep_rounded,
+                    color: Colors.red,
+                  ),
+                  title: const Text(
+                    'Eliminar Imagen Actual',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                  onTap: () {
+                    Navigator.pop(c);
+                    _eliminarFoto();
+                  },
+                ),
+            ],
+          ),
         ),
       ),
     );

@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import '../core/constants.dart'; // Para formatCurrency
-import 'edicion_producto_screen.dart'; // IMPORTACIÓN NECESARIA
-import '../widgets/scanner_screen.dart'; // IMPORTACIÓN PARA EL SCANNER
+import '../core/constants.dart';
+import 'edicion_producto_screen.dart';
+import '../widgets/scanner_screen.dart';
 
 class NuevoProductoScreen extends StatefulWidget {
   final String baseUrl;
@@ -23,13 +23,10 @@ class NuevoProductoScreen extends StatefulWidget {
 class _NuevoProductoScreenState extends State<NuevoProductoScreen> {
   final TextEditingController claveCtrl = TextEditingController(),
       descCtrl = TextEditingController(),
-      cbCtrl =
-          TextEditingController(), // NUEVO: Código de Barras
-      claveProCtrl =
-          TextEditingController(), // NUEVO: Clave Proveedor
+      cbCtrl = TextEditingController(),
+      claveProCtrl = TextEditingController(),
       costoCtrl = TextEditingController(text: "0.00"),
       pzasCajaCtrl = TextEditingController(text: "1"),
-      tipoCtrl = TextEditingController(),
       p1Ctrl = TextEditingController(text: "0.00"),
       p2Ctrl = TextEditingController(text: "0.00"),
       p3Ctrl = TextEditingController(text: "0.00"),
@@ -41,7 +38,7 @@ class _NuevoProductoScreenState extends State<NuevoProductoScreen> {
   bool isLoadingData = true;
   List<Map<String, dynamic>> tiposCompletos = [];
   String? tipoSeleccionado;
-  String cbSugeridoInicial = ""; // Para comparar al guardar
+  String cbSugeridoInicial = "";
 
   @override
   void initState() {
@@ -68,7 +65,7 @@ class _NuevoProductoScreenState extends State<NuevoProductoScreen> {
         });
       }
     } catch (e) {
-      print("Error cargando datos iniciales: $e");
+      debugPrint("Error cargando datos iniciales: $e");
       setState(() => isLoadingData = false);
     }
   }
@@ -84,50 +81,13 @@ class _NuevoProductoScreenState extends State<NuevoProductoScreen> {
 
       setState(() {
         claveCtrl.text = nuevaClave;
-        tipoCtrl.text = nombreTipo;
         if (descCtrl.text.isEmpty) {
           descCtrl.text = "$nuevaClave ";
         }
       });
     } catch (e) {
-      print("Error al generar clave: $e");
+      debugPrint("Error al generar clave: $e");
     }
-  }
-
-  Widget _buildUtilidadVisual(TextEditingController pCtrl) {
-    return ValueListenableBuilder(
-      valueListenable: pCtrl,
-      builder: (context, valP, child) {
-        return ValueListenableBuilder(
-          valueListenable: costoCtrl,
-          builder: (context, valC, child) {
-            double p = double.tryParse(pCtrl.text) ?? 0;
-            double c = double.tryParse(costoCtrl.text) ?? 0;
-            double ut = 0;
-            double por = 0;
-
-            if (p > 0) {
-              ut = p - c;
-              por = (c > 0) ? (ut / c) * 100 : 0;
-            }
-
-            return Padding(
-              padding: const EdgeInsets.only(left: 12, bottom: 10, top: 2),
-              child: Text(
-                "Ganancia: ${formatCurrency(ut)} (${por.toStringAsFixed(1)}%)",
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                  color: p == 0
-                      ? Colors.grey
-                      : (ut >= 0 ? Colors.green[700] : Colors.red),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
   }
 
   Future<void> _guardarNuevo() async {
@@ -164,10 +124,7 @@ class _NuevoProductoScreenState extends State<NuevoProductoScreen> {
       final response = await http
           .post(
             Uri.parse('${widget.baseUrl}/api/abmc/producto/nuevo'),
-            headers: {
-              'Content-Type': 'application/json; charset=UTF-8',
-              'Accept': 'application/json',
-            },
+            headers: {'Content-Type': 'application/json; charset=UTF-8'},
             body: json.encode(payload),
           )
           .timeout(const Duration(seconds: 15));
@@ -176,17 +133,15 @@ class _NuevoProductoScreenState extends State<NuevoProductoScreen> {
         final resBody = json.decode(response.body);
         if (resBody['success'] == true) {
           if (!mounted) return;
-
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text("✅ ÉXITO: Guardado en Base de Datos"),
-              backgroundColor: Colors.green,
+              content: Text("✅ Producto creado con éxito"),
+              backgroundColor: verdeExito,
             ),
           );
 
-          final productoData = resBody['producto'];
-          final String claveFinal = productoData != null
-              ? productoData['Clave'].toString()
+          final String claveFinal = resBody['producto'] != null
+              ? resBody['producto']['Clave'].toString()
               : resBody['clave'].toString();
 
           Navigator.pushReplacement(
@@ -201,190 +156,257 @@ class _NuevoProductoScreenState extends State<NuevoProductoScreen> {
             ),
           );
         } else {
-          throw Exception(resBody['error'] ?? "Error desconocido al guardar.");
+          throw Exception(resBody['error'] ?? "Error al guardar.");
         }
-      } else {
-        final errorBody = json.decode(response.body);
-        throw Exception(
-          errorBody['error'] ?? "Error del servidor: ${response.statusCode}",
-        );
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("❌ Error: $e"),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 5),
-        ),
+        SnackBar(content: Text("❌ Error: $e"), backgroundColor: Colors.red),
       );
     } finally {
       if (mounted) setState(() => isSaving = false);
     }
   }
 
-  Widget _numericField(TextEditingController ctrl, String label) => Expanded(
-    child: TextFormField(
-      controller: ctrl,
-      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      decoration: InputDecoration(
-        labelText: label,
-        border: const OutlineInputBorder(),
-        isDense: true,
-      ),
-      onTap: () {
-        if (ctrl.text == "0" || ctrl.text == "0.00" || ctrl.text == "0.0") {
-          ctrl.clear();
-        }
-      },
-    ),
-  );
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: fondoGris,
       appBar: AppBar(
-        title: const Text("Nuevo Producto"),
-        backgroundColor: const Color(0xFFD32F2F), // Rojo Factory
+        title: const Text(
+          "Nuevo Producto",
+          style: TextStyle(fontWeight: FontWeight.w300),
+        ),
+        backgroundColor: azulPrimario,
+        elevation: 0,
         actions: [
           if (!isSaving && !isLoadingData)
-            IconButton(icon: const Icon(Icons.check), onPressed: _guardarNuevo),
+            IconButton(
+              icon: const Icon(Icons.check_circle_outline, size: 28),
+              onPressed: _guardarNuevo,
+            ),
         ],
       ),
       body: (isSaving || isLoadingData)
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: CircularProgressIndicator(color: azulPrimario))
           : SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  _sectionTitle("CATEGORIZACIÓN"),
                   DropdownButtonFormField<String>(
-                    initialValue: tipoSeleccionado,
-                    decoration: const InputDecoration(
-                      labelText: "Tipo / Categoría",
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.category),
+                    value: tipoSeleccionado,
+                    decoration: _inputStyle(
+                      "Seleccionar Tipo",
+                      Icons.category_outlined,
                     ),
-                    items: tiposCompletos.map((t) {
-                      return DropdownMenuItem<String>(
-                        value: t['Descripcion'].toString(),
-                        child: Text(t['Descripcion'].toString()),
-                      );
-                    }).toList(),
-                    onChanged: (String? newValue) {
-                      setState(() => tipoSeleccionado = newValue);
-                      if (newValue != null) _actualizarClaveAuto(newValue);
+                    items: tiposCompletos
+                        .map(
+                          (t) => DropdownMenuItem(
+                            value: t['Descripcion'].toString(),
+                            child: Text(t['Descripcion'].toString()),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (val) {
+                      setState(() => tipoSeleccionado = val);
+                      if (val != null) _actualizarClaveAuto(val);
                     },
                   ),
                   const SizedBox(height: 15),
                   TextFormField(
                     controller: claveCtrl,
                     readOnly: true,
-                    decoration: const InputDecoration(
-                      labelText: "Clave del Producto (Auto)",
-                      border: OutlineInputBorder(),
-                      fillColor: Color(0xFFFFF9C4),
-                      filled: true,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: azulPrimario,
                     ),
+                    decoration: _inputStyle(
+                      "Clave Sugerida (Auto)",
+                      Icons.vpn_key_outlined,
+                    ).copyWith(fillColor: azulPrimario.withOpacity(0.05)),
                   ),
-                  const SizedBox(height: 15),
+                  const SizedBox(height: 30),
+
+                  _sectionTitle("DATOS GENERALES"),
                   TextFormField(
                     controller: descCtrl,
                     maxLength: 50,
                     textCapitalization: TextCapitalization.characters,
-                    decoration: const InputDecoration(
-                      labelText: "Descripción",
-                      border: OutlineInputBorder(),
+                    decoration: _inputStyle(
+                      "Descripción del Producto",
+                      Icons.description_outlined,
                     ),
                   ),
+                  const SizedBox(height: 10),
                   Row(
                     children: [
                       Expanded(
                         child: TextFormField(
                           controller: cbCtrl,
-                          decoration: InputDecoration(
-                            labelText: "Cód. Barras",
-                            border: const OutlineInputBorder(),
-                            isDense: true,
-                            // SE AÑADE LA LÓGICA DE ESCANEO AQUÍ
-                            prefixIcon: IconButton(
-                              icon: const Icon(
-                                Icons.qr_code_scanner,
-                                size: 20,
-                                color: Color(0xFFD32F2F),
+                          decoration:
+                              _inputStyle(
+                                "Cód. Barras",
+                                Icons.qr_code_2,
+                              ).copyWith(
+                                prefixIcon: IconButton(
+                                  icon: const Icon(
+                                    Icons.qr_code_scanner,
+                                    color: azulAcento,
+                                  ),
+                                  onPressed: () async {
+                                    final res = await showDialog<String>(
+                                      context: context,
+                                      builder: (context) =>
+                                          const ScannerScreen(),
+                                    );
+                                    if (res != null)
+                                      setState(() => cbCtrl.text = res);
+                                  },
+                                ),
                               ),
-                              onPressed: () async {
-                                final res = await showDialog<String>(
-                                  context: context,
-                                  builder: (context) => const ScannerScreen(),
-                                );
-                                if (res != null) {
-                                  setState(() {
-                                    cbCtrl.text = res;
-                                  });
-                                }
-                              },
-                            ),
-                          ),
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 10),
                       Expanded(
                         child: TextFormField(
                           controller: claveProCtrl,
-                          decoration: const InputDecoration(
-                            labelText: "Clave Proveedor",
-                            border: OutlineInputBorder(),
-                            isDense: true,
-                            prefixIcon: Icon(Icons.inventory_2, size: 20),
-                          ),
+                          decoration: _inputStyle("Clave Proveedor", Icons.tag),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 15),
+                  const SizedBox(height: 30),
+
+                  _sectionTitle("FINANZAS INICIALES"),
                   Row(
                     children: [
-                      _numericField(costoCtrl, "Costo"),
-                      const SizedBox(width: 8),
-                      _numericField(pzasCajaCtrl, "Pzas/Caja"),
+                      _numericField(
+                        costoCtrl,
+                        "Costo Compra",
+                        Icons.payments_outlined,
+                      ),
+                      const SizedBox(width: 10),
+                      _numericField(
+                        pzasCajaCtrl,
+                        "Pzas/Caja",
+                        Icons.inventory_2_outlined,
+                      ),
                     ],
                   ),
                   const SizedBox(height: 20),
-                  const Text(
-                    "PRECIOS Y UTILIDADES",
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.blueGrey,
-                    ),
-                  ),
-                  const Divider(),
-                  Row(
-                    children: [
-                      _numericField(p1Ctrl, "Precio 1"),
-                      const SizedBox(width: 8),
-                      _numericField(m1Ctrl, "Min 1"),
-                    ],
-                  ),
-                  _buildUtilidadVisual(p1Ctrl),
-                  Row(
-                    children: [
-                      _numericField(p2Ctrl, "Precio 2"),
-                      const SizedBox(width: 8),
-                      _numericField(m2Ctrl, "Min 2"),
-                    ],
-                  ),
-                  _buildUtilidadVisual(p2Ctrl),
-                  Row(
-                    children: [
-                      _numericField(p3Ctrl, "Precio 3"),
-                      const SizedBox(width: 8),
-                      _numericField(m3Ctrl, "Min 3"),
-                    ],
-                  ),
-                  _buildUtilidadVisual(p3Ctrl),
+
+                  _priceRow(p1Ctrl, m1Ctrl, "Precio 1 (Menudeo)"),
+                  _utilidadRow(p1Ctrl),
+                  _priceRow(p2Ctrl, m2Ctrl, "Precio 2 (Mayoreo)"),
+                  _utilidadRow(p2Ctrl),
+                  _priceRow(p3Ctrl, m3Ctrl, "Precio 3 (Distribuidor)"),
+                  _utilidadRow(p3Ctrl),
+                  const SizedBox(height: 40),
                 ],
               ),
             ),
+    );
+  }
+
+  Widget _sectionTitle(String text) => Padding(
+    padding: const EdgeInsets.only(bottom: 12, left: 5),
+    child: Text(
+      text,
+      style: const TextStyle(
+        fontWeight: FontWeight.bold,
+        fontSize: 11,
+        color: azulAcento,
+        letterSpacing: 1.2,
+      ),
+    ),
+  );
+
+  InputDecoration _inputStyle(String label, IconData icon) => InputDecoration(
+    labelText: label,
+    prefixIcon: Icon(icon, color: azulAcento, size: 22),
+    filled: true,
+    fillColor: Colors.white,
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(15),
+      borderSide: BorderSide.none,
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(15),
+      borderSide: BorderSide.none,
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(15),
+      borderSide: const BorderSide(color: azulPrimario, width: 1),
+    ),
+    isDense: true,
+  );
+
+  Widget _numericField(
+    TextEditingController ctrl,
+    String label,
+    IconData icon,
+  ) => Expanded(
+    child: TextFormField(
+      controller: ctrl,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      decoration: _inputStyle(label, icon),
+      onTap: () {
+        if (ctrl.text == "0" || ctrl.text == "0.00") ctrl.clear();
+      },
+    ),
+  );
+
+  Widget _priceRow(
+    TextEditingController p,
+    TextEditingController m,
+    String label,
+  ) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Row(
+      children: [
+        _numericField(p, label, Icons.attach_money_rounded),
+        const SizedBox(width: 10),
+        Expanded(
+          child: TextFormField(
+            controller: m,
+            keyboardType: TextInputType.number,
+            decoration: _inputStyle("Mín.", Icons.shopping_basket_outlined),
+            onTap: () {
+              if (m.text == "0") m.clear();
+            },
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _utilidadRow(TextEditingController pCtrl) {
+    return ValueListenableBuilder(
+      valueListenable: pCtrl,
+      builder: (context, valP, child) {
+        return ValueListenableBuilder(
+          valueListenable: costoCtrl,
+          builder: (context, valC, child) {
+            double p = double.tryParse(pCtrl.text) ?? 0;
+            double c = double.tryParse(costoCtrl.text) ?? 0;
+            double ut = p - c;
+            double por = (c > 0) ? (ut / c) * 100 : 0;
+            return Padding(
+              padding: const EdgeInsets.only(left: 15, bottom: 15),
+              child: Text(
+                "Utilidad: ${formatCurrency(ut)} (${por.toStringAsFixed(1)}%)",
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: ut >= 0 ? verdeExito : Colors.red,
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }

@@ -5,10 +5,13 @@ import 'screens/inventario_screen.dart';
 import 'screens/admin_login_screen.dart'; // <--- CORREGIDO: Importamos el login correcto
 import 'package:factory_admin/services/tienda_service.dart';
 import 'screens/dashboard_screen.dart';
+import '../core/security_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final prefs = await SharedPreferences.getInstance();
+
+  await SecurityService.cargarPermisos();
 
   String? savedUrl = prefs.getString('custom_api_url');
   String finalUrl = savedUrl ?? AppConfig.baseUrl;
@@ -26,11 +29,19 @@ class MiNegocioApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Factory POS Admin',
+      // En MiNegocioApp dentro de main.dart
       theme: ThemeData(
-        primarySwatch: Colors.red,
-        useMaterial3: false,
-        primaryColor: const Color(0xFFD32F2F),
-        scaffoldBackgroundColor: const Color(0xFFF5F5F5),
+        primaryColor: AppColors.primaryBlue,
+        scaffoldBackgroundColor: AppColors.background,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: AppColors.primaryBlue,
+          foregroundColor: Colors.white,
+          elevation: 0,
+        ),
+        textTheme: const TextTheme(
+          bodyMedium: TextStyle(color: AppColors.textDark),
+        ),
+        useMaterial3: true, // Esto le dará un look mucho más moderno
       ),
       home: RootHandler(baseUrl: baseUrl),
     );

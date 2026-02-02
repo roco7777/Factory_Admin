@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
-// import 'inventario_screen.dart'; // Ya no lo necesitamos aquí
-import 'dashboard_screen.dart'; // <--- Importamos el Dashboard
+import '../core/constants.dart';
+import '../core/security_service.dart'; // <--- IMPORTANTE: Importamos el nuevo servicio
+import 'dashboard_screen.dart';
+import '../core/security_service.dart';
 
 class AdminLoginScreen extends StatefulWidget {
   final String baseUrl;
@@ -19,6 +21,13 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
   bool isLoading = false;
 
   Future<void> attemptLogin() async {
+    if (userController.text.isEmpty || passwordController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Por favor, completa todos los campos')),
+      );
+      return;
+    }
+
     setState(() => isLoading = true);
     try {
       final response = await http.post(
@@ -33,13 +42,26 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
 
       if (response.statusCode == 200 && data['success']) {
         final prefs = await SharedPreferences.getInstance();
-        // Guardamos las credenciales
-        await prefs.setString('saved_user', userController.text);
+
+        // --- SEGURIDAD PLUS: GUARDADO DE DATOS Y PERMISOS ---
+        await prefs.setString(
+          'saved_user',
+          data['user']?.toString() ?? userController.text,
+        );
         await prefs.setString('saved_rol', data['rol']?.toString() ?? 'Normal');
+
+        // Guardamos la lista de slugs que viene del servidor
+        if (data['permisos'] != null) {
+          List<String> listaPermisos = List<String>.from(data['permisos']);
+          await prefs.setStringList('user_permissions', listaPermisos);
+
+          // Cargamos los permisos en el servicio inmediatamente para que estén listos
+          await SecurityService.cargarPermisos();
+        }
+        // ---------------------------------------------------
 
         if (!mounted) return;
 
-        // --- CAMBIO CLAVE: Redirigimos al DASHBOARD ---
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
@@ -64,52 +86,101 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // El resto de tu UI se mantiene igual, ya tiene el estilo Factory Pro.
     return Scaffold(
+      backgroundColor: fondoGris,
       appBar: AppBar(
-        title: const Text('Acceso Administrativo'),
-        backgroundColor: const Color(0xFFD32F2F),
+        title: const Text(
+          'Acceso Administrativo',
+          style: TextStyle(fontWeight: FontWeight.w300, fontSize: 18),
+        ),
+        backgroundColor: azulPrimario,
         foregroundColor: Colors.white,
+        elevation: 0,
+        centerTitle: true,
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(32.0),
+      body: Center(
         child: SingleChildScrollView(
+          padding: const EdgeInsets.all(32.0),
           child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const Icon(
-                Icons.admin_panel_settings,
-                size: 80,
-                color: Color(0xFFD32F2F),
+                Icons.admin_panel_settings_rounded,
+                size: 100,
+                color: azulPrimario,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                "FACTORY SUITE",
+                style: TextStyle(
+                  color: azulAcento.withOpacity(0.7),
+                  letterSpacing: 3,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
+              ),
+              const SizedBox(height: 40),
+              TextField(
+                controller: userController,
+                decoration: InputDecoration(
+                  labelText: 'Usuario',
+                  labelStyle: const TextStyle(color: azulAcento),
+                  prefixIcon: const Icon(
+                    Icons.person_outline,
+                    color: azulAcento,
+                  ),
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(15),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
               ),
               const SizedBox(height: 20),
               TextField(
-                controller: userController,
-                decoration: const InputDecoration(
-                  labelText: 'Usuario',
-                  prefixIcon: Icon(Icons.person),
-                ),
-              ),
-              TextField(
                 controller: passwordController,
                 obscureText: true,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Contraseña',
-                  prefixIcon: Icon(Icons.lock),
+                  labelStyle: const TextStyle(color: azulAcento),
+                  prefixIcon: const Icon(Icons.lock_outline, color: azulAcento),
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(15),
+                    borderSide: BorderSide.none,
+                  ),
                 ),
               ),
-              const SizedBox(height: 30),
+              const SizedBox(height: 40),
               isLoading
-                  ? const CircularProgressIndicator(color: Color(0xFFD32F2F))
+                  ? const CircularProgressIndicator(color: azulPrimario)
                   : ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFD32F2F),
-                        minimumSize: const Size(double.infinity, 50),
+                        backgroundColor: azulPrimario,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(double.infinity, 55),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(15),
+                        ),
+                        elevation: 2,
                       ),
                       onPressed: attemptLogin,
                       child: const Text(
-                        'ENTRAR AL PANEL',
-                        style: TextStyle(color: Colors.white),
+                        'INGRESAR AL SISTEMA',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.2,
+                        ),
                       ),
                     ),
+              const SizedBox(height: 20),
+              Text(
+                "Servidor: ${widget.baseUrl}",
+                style: const TextStyle(color: Colors.grey, fontSize: 10),
+              ),
             ],
           ),
         ),
