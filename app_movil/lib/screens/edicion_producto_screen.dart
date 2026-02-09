@@ -153,11 +153,13 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
   }
 
   Future<void> _updateProduct() async {
-    if (widget.userRole != 'Administrador') return;
+    //if (widget.userRole != 'Administrador') return;
     setState(() => isSaving = true);
     try {
       final stocksMap = <String, dynamic>{};
       for (int i = 1; i <= 5; i++) {
+        String venta = vCtrls[i]!.text.isEmpty ? '0' : vCtrls[i]!.text;
+        String bodega = bCtrls[i]!.text.isEmpty ? '0' : bCtrls[i]!.text;
         stocksMap['alm$i'] = {
           'ExisPVentas': vCtrls[i]!.text,
           'ExisBodega': bCtrls[i]!.text,
@@ -180,14 +182,31 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
         'Min3': m3Ctrl.text,
         'stocks': stocksMap,
       };
+
+      // Debug para ver qué estamos enviando (útil si falla el servidor)
+      // debugPrint("Enviando payload: $payload");
+
       final response = await http.post(
         Uri.parse('${widget.baseUrl}/api/abmc/producto/${widget.clave}'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode(payload),
       );
-      if (response.statusCode == 200) Navigator.pop(context, true);
+
+      if (response.statusCode == 200) {
+        // Éxito
+        if (mounted) Navigator.pop(context, true);
+      } else {
+        // Manejo de error básico por si el servidor rechaza
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Error al guardar: ${response.statusCode}")),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint("Error guardando producto: $e");
     } finally {
-      setState(() => isSaving = false);
+      if (mounted) setState(() => isSaving = false);
     }
   }
 

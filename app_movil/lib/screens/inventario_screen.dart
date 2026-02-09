@@ -77,6 +77,10 @@ class _PantallaInventarioState extends State<PantallaInventario> {
   Future<void> buscarProductos() async {
     String query = buscadorController.text.trim();
     if (query.isEmpty) return;
+
+    // Ocultar teclado al buscar
+    FocusScope.of(context).unfocus();
+
     setState(() => cargando = true);
 
     try {
@@ -89,9 +93,6 @@ class _PantallaInventarioState extends State<PantallaInventario> {
         setState(() {
           productos = lista;
         });
-        if (lista.isNotEmpty) {
-          _reproducirBip();
-        }
       }
     } catch (e) {
       debugPrint("Error en búsqueda: $e");
@@ -130,7 +131,7 @@ class _PantallaInventarioState extends State<PantallaInventario> {
       ),
       body: Column(
         children: [
-          // --- BARRA DE BÚSQUEDA ESTILO PRO ---
+          // --- BARRA DE BÚSQUEDA ESTILO PRO (MODIFICADA) ---
           Container(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
             decoration: const BoxDecoration(
@@ -156,14 +157,12 @@ class _PantallaInventarioState extends State<PantallaInventario> {
                   borderRadius: BorderRadius.circular(25),
                   borderSide: BorderSide.none,
                 ),
-                prefixIcon: Icon(
-                  Icons.search_rounded,
-                  color: azulAcento.withOpacity(0.7),
-                ),
-                suffixIcon: IconButton(
-                  icon: const Icon(
+
+                // --- CAMBIO 1: ESCÁNER A LA IZQUIERDA (Prefix) ---
+                prefixIcon: IconButton(
+                  icon: Icon(
                     Icons.qr_code_scanner_rounded,
-                    color: azulPrimario,
+                    color: azulAcento.withOpacity(0.7),
                   ),
                   onPressed: () async {
                     final res = await showDialog<String>(
@@ -174,6 +173,15 @@ class _PantallaInventarioState extends State<PantallaInventario> {
                       buscadorController.text = res;
                       buscarProductos();
                     }
+                  },
+                ),
+
+                // --- CAMBIO 2: LUPA A LA DERECHA (Suffix) CON ACCIÓN ---
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.search_rounded, color: azulPrimario),
+                  onPressed: () {
+                    // Ahora al tocar la lupa se ejecuta la búsqueda
+                    buscarProductos();
                   },
                 ),
               ),

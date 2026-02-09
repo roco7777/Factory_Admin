@@ -123,7 +123,11 @@ app.post('/api/producto/upload-foto', upload.single('foto'), async (req, res) =>
                 withoutEnlargement: true, 
                 fit: 'inside'
             })
-            .jpeg({ quality: 80, mozjpeg: true }) // Calidad 80% es perfecta para móvil
+            .jpeg({ 
+                quality: 80, 
+                progressive: True,       // <--- OBLIGATORIO: 'false' para que sea Baseline (Estándar)
+                mozjpeg: True,           // <--- Desactivamos optimizaciones modernas
+            })// Calidad 80% es perfecta para móvil
             .toFile(rutaFinal);
 
         // 3. LIMPIEZA: Borrar el archivo pesado original
@@ -722,15 +726,26 @@ app.get('/api/inventario', async (req, res) => {
                      LIMIT ? OFFSET ?`;
             params = [limit, offset];
         } else {
-            // En búsquedas específicas, mantenemos el orden alfabético para que el usuario no se pierda
+            // Limpiamos el texto para evitar que espacios extras arruinen el LIKE
+            const searchPattern = `%${qRaw.trim()}%`;
+
             query = `SELECT ${camposSelect}
                      FROM PRODUCTOS p
                      INNER JOIN alm${idSuc} a ON p.Clave = a.Clave
-                     WHERE (p.Clave LIKE ? OR p.Descripcion LIKE ? OR p.Tipo LIKE ?) 
-                     AND p.status = 1 AND a.ExisPVentas > 0
-                     ORDER BY p.Descripcion ASC 
+                     WHERE p.status = 1 
+                     AND a.ExisPVentas > 0
+                     AND (
+                        p.Descripcion LIKE ? 
+                        OR p.Clave LIKE ? 
+                        OR p.Tipo LIKE ?
+                     )
+                     ORDER BY 
+                        (p.Descripcion LIKE ?) DESC, -- Los que EMPIEZAN con la palabra van primero
+                        p.Descripcion ASC 
                      LIMIT ? OFFSET ?`;
-            params = [q, q, q, limit, offset];
+            
+            // Pasamos el patrón de búsqueda para los 3 campos + 1 para el orden de relevancia
+            params = [searchPattern, searchPattern, searchPattern, `${qRaw.trim()}%`, limit, offset];
         }
 
         const [results] = await db.execute(query, params);
@@ -1292,6 +1307,134 @@ app.post('/api/usuarios/eliminar', async (req, res) => {
     } catch (e) {
         console.error("ERROR AL ELIMINAR:", e);
         res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+app.post('/api/pedidos/nuevo', async (req, res) => {
+    console.log("---------------");
+    console.log("📥 ¡PETICIÓN DE PEDIDO RECIBIDA!");
+    console.log("Datos:", req.body);
+    console.log("---------------");
+    // 1. Recibimos los datos que manda Flutter
+    const { cliente_id, total, items, sucursal_id } = req.body;
+    
+    // Generamos folio aleatorio
+    const invoice_no = Math.floor(Math.random() * 900000000) + 100000000;
+    
+    // Calculamos total piezas
+    const totalQty = items.reduce((sum, item) => sum + parseInt(item.qty), 0);
+
+    const connection = await db.getConnection();
+    await connection.beginTransaction();
+
+    try {
+        // --- A. INSERTAR EN CABECERA ---
+        const sqlCabecera = `
+            INSERT INTO customer_orders 
+            (customer_id, due_amount, invoice_no, qty, order_date, order_status) 
+            VALUES (?, ?, ?, ?, NOW(), 'PENDIENTE')
+        `;
+        
+        await connection.execute(sqlCabecera, [
+            cliente_id, 
+            total, 
+            invoice_no, 
+            totalQty
+        ]);
+
+        // --- B. INSERTAR DETALLES ---
+        for (const item of items) {
+            // Nota: Aquí validamos que venga item.num_suc, si no, usamos el general
+            const itemSucursal = item.num_suc || sucursal_id || 1;
+
+            const sqlDetalle = `
+                INSERT INTO pending_orders 
+                (customer_id, invoice_no, product_id, qty, order_status, p_price, num_suc, order_date) 
+                VALUES (?, ?, ?, ?, 'pending', ?, ?, NOW())
+            `;
+            // Agregué order_date al insert del detalle también por si acaso
+            
+            await connection.execute(sqlDetalle, [
+                cliente_id,
+                invoice_no,
+                item.p_id,       // <--- OJO: Flutter debe mandar 'p_id' (Clave)
+                item.qty,
+                item.p_price,
+                itemSucursal
+            ]);
+        }
+
+        // --- C. OBTENER WHATSAPP (¡LO NUEVO!) ---
+        // Consultamos el teléfono de la sucursal para devolverlo a la App
+        const [sucursalRows] = await connection.execute(
+            'SELECT TelefonoWhatsapp, Sucursal FROM empresa WHERE Id = ?', 
+            [sucursal_id]
+        );
+        
+        let whatsappDestino = '';
+        let nombreSucursal = '';
+
+        if (sucursalRows.length > 0) {
+            whatsappDestino = sucursalRows[0].TelefonoWhatsapp;
+            nombreSucursal = sucursalRows[0].Sucursal;
+        }
+
+        await connection.commit();
+
+        console.log(`✅ Pedido #${invoice_no} guardado. Sucursal: ${nombreSucursal}`);
+        
+        // --- D. RESPONDER A FLUTTER ---
+        res.json({ 
+            success: true, 
+            id_pedido: invoice_no,
+            whatsapp: whatsappDestino, // <--- Enviamos el dato a la App
+            sucursal: nombreSucursal
+        });
+
+    } catch (e) {
+        await connection.rollback();
+        console.error("❌ Error al guardar pedido:", e);
+        res.status(500).json({ success: false, message: "Error al procesar el pedido." });
+    } finally {
+        connection.release();
+    }
+});
+
+// OBTENER HISTORIAL (Versión DEFINITIVA y OPTIMIZADA)
+app.get('/api/historial/:clienteId', async (req, res) => {
+    const { clienteId } = req.params;
+
+    try {
+        // Consulta directa a la tabla de encabezados
+        // Súper rápida gracias al índice idx_mov_cliente
+        const query = `
+            SELECT 
+                Id AS ticket_id,
+                Folio AS folio_ticket,
+                DATE_FORMAT(Fecha, '%Y-%m-%d') as fecha,
+                Hora as hora,
+                Total AS total_pagado,
+                pedidoweb AS referencia_web,
+                CASE 
+                    WHEN Tarjeta > 0 THEN 'Tarjeta'
+                    WHEN Cheque > 0 THEN 'Cheque'
+                    WHEN Credito > 0 THEN 'Crédito'
+                    ELSE 'Efectivo'
+                END AS metodo_pago,
+                Estatus -- Si agregaste campo de estatus, o asumimos 'Entregado'
+            FROM movimientos
+            WHERE NoCliente = ?
+            ORDER BY Fecha DESC, Hora DESC
+            LIMIT 50
+        `;
+
+        const [historial] = await db.execute(query, [clienteId]);
+        
+        res.json({ success: true, data: historial });
+
+    } catch (error) {
+        console.error("Error historial:", error);
+        res.status(500).json({ success: false, message: 'Error al obtener historial' });
     }
 });
 

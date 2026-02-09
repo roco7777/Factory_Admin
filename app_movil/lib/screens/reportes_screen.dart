@@ -161,43 +161,32 @@ class _UIReporteVivo extends StatelessWidget {
                   padding: EdgeInsets.symmetric(vertical: 15),
                   child: Divider(color: Colors.white12, height: 1),
                 ),
-                // Fila de Efectivo Neto Destacada
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          "EFECTIVO NETO",
-                          style: TextStyle(
-                            color: verdeExito,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
-                        ),
-                        Text(
-                          "Disponible en cajas",
-                          style: TextStyle(color: Colors.white38, fontSize: 10),
-                        ),
-                      ],
-                    ),
-                    Text(
-                      formatCurrency(efectivoNeto),
-                      style: const TextStyle(
-                        color: verdeExito,
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
+
+                // --- CAMBIO 1: TOTAL EFECTIVO AL CENTRO (AMARILLO) ---
+                Text(
+                  formatCurrency(tE), // Total Efectivo Bruto
+                  style: const TextStyle(
+                    color: Colors.amberAccent,
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
+                const Text(
+                  "TOTAL EFECTIVO",
+                  style: TextStyle(
+                    color: Colors.amberAccent,
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+
                 const SizedBox(height: 20),
-                // Desglose rápido
+
+                // --- CAMBIO 2: EFECTIVO NETO ABAJO (BLANCO) ---
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    _miniData("Efectivo", tE),
+                    _miniData("Efectivo neto", efectivoNeto), // Neto disponible
                     _miniData("Retiros", totalRetirosGlobal, isNegative: true),
                     _miniData("Tarjetas", tT),
                   ],

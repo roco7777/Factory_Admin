@@ -200,8 +200,10 @@ class _UIReporteHistorico extends StatelessWidget {
                   padding: EdgeInsets.symmetric(vertical: 15),
                   child: Divider(color: Colors.white12),
                 ),
+
+                // --- CAMBIO 1: AQUÍ PUSIMOS EL EFECTIVO (AMARILLO GRANDE) ---
                 Text(
-                  formatCurrency(tEN),
+                  formatCurrency(tE), // Antes era tEN
                   style: const TextStyle(
                     color: Colors.amberAccent,
                     fontSize: 24,
@@ -209,18 +211,21 @@ class _UIReporteHistorico extends StatelessWidget {
                   ),
                 ),
                 const Text(
-                  "EFECTIVO NETO A ENTREGAR",
+                  "TOTAL EFECTIVO", // Cambiamos etiqueta
                   style: TextStyle(
                     color: Colors.amberAccent,
                     fontSize: 9,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
+
                 const SizedBox(height: 20),
+
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    _itemHeader("Efectivo", tE),
+                    // --- CAMBIO 2: AQUÍ PUSIMOS EL EFECTIVO NETO (BLANCO PEQUEÑO) ---
+                    _itemHeader("Efectivo neto", tEN), // Antes era tE
                     _itemHeader("Tarjeta", tT),
                     _itemHeader("Bancario", tB),
                   ],
