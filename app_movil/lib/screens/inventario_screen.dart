@@ -300,7 +300,7 @@ class _PantallaInventarioState extends State<PantallaInventario> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          item['Clave'].toString(),
+                          "${item['Clave']}  |  Prov: ${item['ClavePro'] ?? 'N/A'}",
                           style: const TextStyle(
                             color: azulAcento,
                             fontWeight: FontWeight.bold,

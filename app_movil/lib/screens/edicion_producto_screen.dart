@@ -29,6 +29,8 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
   String? fotoActual;
 
   final TextEditingController descCtrl = TextEditingController();
+  final TextEditingController presCtrl =
+      TextEditingController(); // NUEVO: Presentacion
   final TextEditingController cbCtrl = TextEditingController();
   final TextEditingController claveProCtrl = TextEditingController();
   final TextEditingController costoCtrl = TextEditingController();
@@ -40,6 +42,15 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
   final TextEditingController m1Ctrl = TextEditingController();
   final TextEditingController m2Ctrl = TextEditingController();
   final TextEditingController m3Ctrl = TextEditingController();
+
+  // NUEVOS CAMPOS DE CONTROL Y FECHAS
+  bool activoCobro = true; // Campo Activo
+  bool statusApp = true; // Campo Status
+  bool pendiente = false; // Campo Pendiente
+  DateTime? lotePend; // Campo LotePend (Fecha)
+
+  String fIngreso = ''; // Solo lectura
+  String ultimaVez = ''; // Solo lectura
 
   final Map<int, TextEditingController> vCtrls = {}, bCtrls = {};
   final Map<int, bool> activoStocks = {};
@@ -67,6 +78,7 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
         setState(() {
           fotoActual = d['Foto'];
           descCtrl.text = d['Descripcion']?.toString() ?? '';
+          presCtrl.text = d['Presentacion']?.toString() ?? ''; // NUEVO
           cbCtrl.text = d['CB']?.toString() ?? '';
           claveProCtrl.text = d['ClavePro']?.toString() ?? '';
           costoCtrl.text =
@@ -87,6 +99,27 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
               .toStringAsFixed(0);
           tipoCtrl.text = d['Tipo']?.toString() ?? '';
 
+          // NUEVOS VALORES
+          activoCobro =
+              (d['Activo'] == 1 ||
+              d['Activo'] == true ||
+              d['Activo'] == 'true');
+          statusApp =
+              (d['status'] == 1 ||
+              d['status'] == true ||
+              d['status'] == 'true');
+          pendiente =
+              (d['pendiente'] == 1 ||
+              d['pendiente'] == true ||
+              d['pendiente'] == 'true');
+
+          if (d['LotePend'] != null && d['LotePend'].toString().isNotEmpty) {
+            lotePend = DateTime.tryParse(d['LotePend'].toString());
+          }
+
+          fIngreso = _formatDateSafely(d['FIngreso']);
+          ultimaVez = _formatDateSafely(d['UltimaVez']);
+
           for (int i = 1; i <= 5; i++) {
             vCtrls[i]!.text =
                 (double.tryParse(d['alm${i}_pventas']?.toString() ?? '0') ?? 0)
@@ -101,6 +134,17 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
       }
     } finally {
       setState(() => isLoading = false);
+    }
+  }
+
+  String _formatDateSafely(dynamic dateValue) {
+    if (dateValue == null || dateValue.toString().isEmpty)
+      return 'No registrado';
+    try {
+      DateTime dt = DateTime.parse(dateValue.toString());
+      return "${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}";
+    } catch (e) {
+      return dateValue.toString(); // Por si viene en otro formato desde MariaDB
     }
   }
 
@@ -153,7 +197,6 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
   }
 
   Future<void> _updateProduct() async {
-    //if (widget.userRole != 'Administrador') return;
     setState(() => isSaving = true);
     try {
       final stocksMap = <String, dynamic>{};
@@ -161,14 +204,22 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
         String venta = vCtrls[i]!.text.isEmpty ? '0' : vCtrls[i]!.text;
         String bodega = bCtrls[i]!.text.isEmpty ? '0' : bCtrls[i]!.text;
         stocksMap['alm$i'] = {
-          'ExisPVentas': vCtrls[i]!.text,
-          'ExisBodega': bCtrls[i]!.text,
+          'ExisPVentas': venta,
+          'ExisBodega': bodega,
           'ACTIVO': activoStocks[i]! ? 1 : 0,
         };
       }
+
+      String? lotePendStr;
+      if (pendiente && lotePend != null) {
+        lotePendStr =
+            "${lotePend!.year}-${lotePend!.month.toString().padLeft(2, '0')}-${lotePend!.day.toString().padLeft(2, '0')}";
+      }
+
       final payload = {
         'Clave': widget.clave,
         'Descripcion': descCtrl.text.toUpperCase(),
+        'Presentacion': presCtrl.text, // NUEVO
         'CB': cbCtrl.text.trim(),
         'ClavePro': claveProCtrl.text.trim(),
         'PCosto': costoCtrl.text,
@@ -180,11 +231,12 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
         'Min1': m1Ctrl.text,
         'Min2': m2Ctrl.text,
         'Min3': m3Ctrl.text,
+        'Activo': activoCobro ? 1 : 0, // NUEVO
+        'Status': statusApp ? 1 : 0, // NUEVO
+        'Pendiente': pendiente ? 1 : 0, // NUEVO
+        'LotePend': lotePendStr, // NUEVO
         'stocks': stocksMap,
       };
-
-      // Debug para ver qué estamos enviando (útil si falla el servidor)
-      // debugPrint("Enviando payload: $payload");
 
       final response = await http.post(
         Uri.parse('${widget.baseUrl}/api/abmc/producto/${widget.clave}'),
@@ -193,10 +245,8 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
       );
 
       if (response.statusCode == 200) {
-        // Éxito
         if (mounted) Navigator.pop(context, true);
       } else {
-        // Manejo de error básico por si el servidor rechaza
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text("Error al guardar: ${response.statusCode}")),
@@ -221,6 +271,7 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
       controller: ctrl,
       enabled: enabled,
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      obscureText: obscureText,
       decoration: InputDecoration(
         labelText: label,
         prefixIcon: icon != null
@@ -271,7 +322,6 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // --- SEGURIDAD PLUS: CONSULTA DE PERMISOS ---
     final bool puedeVerCostos = SecurityService.tienePermiso('inv_ver_costos');
     final bool puedeEditarPrecios = SecurityService.tienePermiso(
       'inv_editar_precios',
@@ -282,8 +332,6 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
     final bool puedeEditarStock = SecurityService.tienePermiso(
       'inv_editar_stock',
     );
-
-    // El permiso 'can' ahora es dinámico basado en permisos o rol
     final bool esSuper = widget.userRole == 'Superusuario';
     final bool can =
         esSuper || SecurityService.tienePermiso('inv_editar_basico');
@@ -298,7 +346,6 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
         backgroundColor: azulPrimario,
         elevation: 0,
         actions: [
-          // Solo mostramos el botón de guardar si tiene permiso de edición
           if (can && !isLoading)
             IconButton(
               icon: const Icon(Icons.check_circle_outline, size: 28),
@@ -315,7 +362,7 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // --- SECCIÓN DE FOTO (Bloqueada si no puede editar básico) ---
+                      // --- FOTO ---
                       Center(
                         child: GestureDetector(
                           onTap: puedeEditarBasico
@@ -375,11 +422,21 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
                       _sectionTitle("INFORMACIÓN BÁSICA"),
                       TextFormField(
                         controller: descCtrl,
-                        enabled: puedeEditarBasico, // Bloqueo granular
+                        enabled: puedeEditarBasico,
                         textCapitalization: TextCapitalization.characters,
                         decoration: _inputStyle(
                           "Descripción del Producto",
                           Icons.description_outlined,
+                        ),
+                      ),
+                      const SizedBox(height: 15),
+                      TextFormField(
+                        controller: presCtrl,
+                        enabled: puedeEditarBasico,
+                        textCapitalization: TextCapitalization.sentences,
+                        decoration: _inputStyle(
+                          "Presentación (Ej. Caja con 12 pzas)",
+                          Icons.view_in_ar_outlined,
                         ),
                       ),
                       const SizedBox(height: 15),
@@ -406,19 +463,135 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
                       ),
                       const SizedBox(height: 30),
 
+                      // --- ESTADO Y VISIBILIDAD ---
+                      _sectionTitle("ESTADO Y OPERATIVIDAD"),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(15),
+                          border: Border.all(color: grisBordes),
+                        ),
+                        child: Column(
+                          children: [
+                            SwitchListTile(
+                              title: const Text(
+                                "Activo para cobro en cajas",
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              subtitle: const Text(
+                                "Permite vender el producto en mostrador",
+                                style: TextStyle(fontSize: 12),
+                              ),
+                              activeColor: verdeExito,
+                              value: activoCobro,
+                              onChanged: puedeEditarBasico
+                                  ? (val) => setState(() => activoCobro = val)
+                                  : null,
+                            ),
+                            const Divider(height: 1),
+                            SwitchListTile(
+                              title: const Text(
+                                "Visible en la App de clientes (Status)",
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              activeColor: azulPrimario,
+                              value: statusApp,
+                              onChanged: puedeEditarBasico
+                                  ? (val) {
+                                      setState(() {
+                                        statusApp = val;
+                                        if (val)
+                                          pendiente =
+                                              false; // Si lo hago visible, apago pendiente
+                                      });
+                                    }
+                                  : null,
+                            ),
+                            const Divider(height: 1),
+                            SwitchListTile(
+                              title: const Text(
+                                "Programar salida (Pendiente)",
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                              subtitle: const Text(
+                                "Oculta el producto hasta una fecha específica",
+                                style: TextStyle(fontSize: 12),
+                              ),
+                              activeColor: Colors.orange,
+                              value: pendiente,
+                              onChanged: puedeEditarBasico
+                                  ? (val) {
+                                      setState(() {
+                                        pendiente = val;
+                                        if (val)
+                                          statusApp =
+                                              false; // Si lo pongo pendiente, apago status
+                                      });
+                                    }
+                                  : null,
+                            ),
+                            if (pendiente) ...[
+                              const Divider(height: 1),
+                              ListTile(
+                                leading: const Icon(
+                                  Icons.calendar_month,
+                                  color: Colors.orange,
+                                ),
+                                title: const Text("Fecha programada de salida"),
+                                subtitle: Text(
+                                  lotePend != null
+                                      ? "${lotePend!.day.toString().padLeft(2, '0')}/${lotePend!.month.toString().padLeft(2, '0')}/${lotePend!.year}"
+                                      : "Toca para seleccionar fecha",
+                                  style: TextStyle(
+                                    color: lotePend == null
+                                        ? Colors.red
+                                        : Colors.black87,
+                                  ),
+                                ),
+                                trailing: const Icon(Icons.edit, size: 18),
+                                onTap: puedeEditarBasico
+                                    ? () async {
+                                        DateTime? picked = await showDatePicker(
+                                          context: context,
+                                          initialDate:
+                                              lotePend ?? DateTime.now(),
+                                          firstDate: DateTime.now().subtract(
+                                            const Duration(days: 1),
+                                          ),
+                                          lastDate: DateTime(2030),
+                                        );
+                                        if (picked != null) {
+                                          setState(() => lotePend = picked);
+                                        }
+                                      }
+                                    : null,
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 30),
+
                       // --- COSTOS Y PRECIOS ---
                       _sectionTitle("COSTOS Y RENTABILIDAD"),
                       Row(
                         children: [
-                          // COSTO: Protegido con obscureText si no tiene permiso de ver
                           _internalNumericField(
                             costoCtrl,
                             puedeVerCostos
                                 ? "Costo de Compra"
                                 : "COSTO PROTEGIDO",
                             enabled: puedeVerCostos && puedeEditarBasico,
-                            obscureText:
-                                !puedeVerCostos, // <--- Muestra asteriscos si no tiene permiso
+                            obscureText: !puedeVerCostos,
                             icon: puedeVerCostos
                                 ? Icons.payments_outlined
                                 : Icons.lock_outline,
@@ -433,16 +606,12 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
                         ],
                       ),
                       const SizedBox(height: 20),
-
                       _priceRow(p1Ctrl, m1Ctrl, "Precio 1", puedeEditarPrecios),
                       if (puedeVerCostos) _internalUtilidad(p1Ctrl, costoCtrl),
-
                       _priceRow(p2Ctrl, m2Ctrl, "Precio 2", puedeEditarPrecios),
                       if (puedeVerCostos) _internalUtilidad(p2Ctrl, costoCtrl),
-
                       _priceRow(p3Ctrl, m3Ctrl, "Precio 3", puedeEditarPrecios),
                       if (puedeVerCostos) _internalUtilidad(p3Ctrl, costoCtrl),
-
                       const SizedBox(height: 30),
 
                       // --- EXISTENCIAS ---
@@ -456,9 +625,42 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
                         ),
                         child: Column(
                           children: [
-                            // Solo se pueden editar si tiene el permiso inv_editar_stock
                             for (int i = 1; i <= 5; i++)
                               _buildStockRow(i, puedeEditarStock),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 30),
+
+                      // --- FECHAS DEL SISTEMA (SOLO LECTURA) ---
+                      _sectionTitle("INFORMACIÓN DEL SISTEMA"),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(15),
+                        decoration: BoxDecoration(
+                          color: azulPrimario.withOpacity(0.05),
+                          borderRadius: BorderRadius.circular(15),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              "🗓️ Fecha de Ingreso: $fIngreso",
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: Colors.blueGrey,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              "🛒 Última Venta: $ultimaVez",
+                              style: const TextStyle(
+                                fontSize: 13,
+                                color: Colors.blueGrey,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -543,7 +745,7 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
           CircularProgressIndicator(color: Colors.white),
           SizedBox(height: 15),
           Text(
-            "Sincronizando con el servidor...",
+            "Guardando en el servidor...",
             style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
           ),
         ],

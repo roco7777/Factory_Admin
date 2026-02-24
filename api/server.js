@@ -927,7 +927,7 @@ app.post('/api/abmc/producto/:clave', async (req, res) => {
     const p2 = parseFloat(b.Precio2) || 0;
     const p3 = parseFloat(b.Precio3) || 0;
 
-    // Mantenemos tus cálculos de valores originales
+    // Calculamos utilidades
     const v = [
         calcularValores(p1, costo), 
         calcularValores(p2, costo), 
@@ -939,16 +939,18 @@ app.post('/api/abmc/producto/:clave', async (req, res) => {
         conn = await db.getConnection(); 
         await conn.beginTransaction(); 
         
-        // El SQL se mantiene igual, es correcto.
-        const sqlUpdate = `UPDATE PRODUCTOS SET 
-            Descripcion=?, CB=?, ClavePro=?, PCosto=?, PCostoImp=?, PzasxCaja=?, Tipo=?, 
+        // UPDATE con los nombres exactos de las columnas en tu MariaDB
+        const sqlUpdate = `UPDATE productos SET 
+            Descripcion=?, Presentacion=?, CB=?, ClavePro=?, PCosto=?, PCostoImp=?, PzasxCaja=?, Tipo=?, 
             Precio1=?, Precio2=?, Precio3=?, 
             Min1=?, Min2=?, Min3=?, 
-            Util1=?, PorUtil1=?, Util2=?, PorUtil2=?, Util3=?, PorUtil3=? 
+            Util1=?, PorUtil1=?, Util2=?, PorUtil2=?, Util3=?, PorUtil3=?,
+            Activo=?, status=?, pendiente=?, LotePend=?
             WHERE Clave=?`;
 
         await conn.execute(sqlUpdate, [ 
             (b.Descripcion || '').toUpperCase(), 
+            b.Presentacion || '',              
             b.CB || req.params.clave, 
             b.ClavePro || '',         
             costo, 
@@ -964,13 +966,17 @@ app.post('/api/abmc/producto/:clave', async (req, res) => {
             v[0].utilidad, v[0].porutil, 
             v[1].utilidad, v[1].porutil, 
             v[2].utilidad, v[2].porutil, 
+            b.Activo !== undefined ? b.Activo : 1,          // Activo
+            b.Status !== undefined ? b.Status : 1,          // status (minúscula en DB)
+            b.Pendiente !== undefined ? b.Pendiente : 0,    // pendiente (minúscula en DB)
+            b.LotePend || null,                             // LotePend
             req.params.clave 
         ]); 
 
+        // Actualización de stocks en almacenes
         if (b.stocks) { 
             for (let i = 1; i <= 5; i++) { 
                 const s = b.stocks[`alm${i}`]; 
-                // Cambiamos el UPDATE de stock para ser más robustos con los valores recibidos
                 if (s) {
                     await conn.execute(
                         `UPDATE alm${i} SET ExisPVentas=?, ExisBodega=?, ACTIVO=? WHERE Clave=?`, 
@@ -984,11 +990,13 @@ app.post('/api/abmc/producto/:clave', async (req, res) => {
                 }
             } 
         } 
+        
         await conn.commit(); 
         res.json({ success: true }); 
+        
     } catch (e) { 
         if (conn) await conn.rollback(); 
-        console.error("Error en Update:", e.message);
+        console.error("Error en Update de Producto:", e.message);
         res.status(500).json({ success: false, error: e.message }); 
     } finally { 
         if (conn) conn.release(); 
