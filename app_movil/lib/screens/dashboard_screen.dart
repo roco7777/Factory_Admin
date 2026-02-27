@@ -9,7 +9,8 @@ import 'admin_login_screen.dart';
 import 'reportes_screen.dart';
 import 'historico_screen.dart';
 import 'gestion_usuarios_screen.dart';
-import 'gestion_roles_screen.dart'; // <--- Importante
+import 'gestion_roles_screen.dart';
+import 'lanzamientos_screen.dart'; // <--- 1. NUEVA IMPORTACIÓN
 
 class DashboardScreen extends StatefulWidget {
   final String baseUrl;
@@ -299,7 +300,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return Scaffold(
       backgroundColor: fondoGris,
-      // EL APPBAR estándar garantiza que el botón del Drawer aparezca correctamente
       appBar: AppBar(
         backgroundColor: azulPrimario,
         elevation: 0,
@@ -351,7 +351,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ],
       ),
-      // EL DRAWER ahora se maneja correctamente por el Scaffold
       drawer: Drawer(
         elevation: 20,
         child: Container(
@@ -499,6 +498,18 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     PantallaInventario(
                       userRole: rolUsuario,
                       baseUrl: widget.baseUrl,
+                    ),
+                  ),
+                ),
+                // --- 2. NUEVO BOTÓN DE LANZAMIENTOS ---
+                _buildMenuCard(
+                  icon: Icons.rocket_launch_outlined,
+                  title: "Lanzamientos",
+                  color: Colors.deepPurple,
+                  onTap: () => _navegarA(
+                    LanzamientosScreen(
+                      baseUrl: widget.baseUrl,
+                      userRole: rolUsuario, // <--- ESTO ES LO ÚNICO NUEVO AQUÍ
                     ),
                   ),
                 ),

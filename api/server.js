@@ -1446,4 +1446,82 @@ app.get('/api/historial/:clienteId', async (req, res) => {
     }
 });
 
+// ==========================================
+// MÓDULO DE LANZAMIENTOS (LOTES PENDIENTES)
+// ==========================================
+
+// 1. Obtener resumen de Lotes (Fechas programadas)
+app.get('/api/abmc/lotes-resumen', async (req, res) => {
+    try {
+        // Agrupamos por fecha y contamos cuántos están pendientes vs publicados
+        const query = `
+            SELECT 
+                DATE_FORMAT(LotePend, '%Y-%m-%d') as FechaLote, 
+                COUNT(*) as TotalProductos, 
+                SUM(pendiente) as TotalPendientes,
+                SUM(status) as TotalPublicados
+            FROM productos
+            WHERE LotePend IS NOT NULL
+            GROUP BY DATE_FORMAT(LotePend, '%Y-%m-%d')
+            ORDER BY FechaLote DESC
+        `;
+        const [rows] = await db.execute(query);
+        res.json(rows);
+    } catch (e) {
+        console.error("Error al obtener resumen de lotes:", e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// 2. Acción Masiva: Publicar o Revertir un Lote completo
+app.post('/api/abmc/lotes/accion', async (req, res) => {
+    const { fechaLote, accion } = req.body; // accion debe ser 'publicar' o 'revertir'
+    
+    try {
+        // Lógica de negocio:
+        // Si es 'publicar' -> status = 1 (visible), pendiente = 0
+        // Si es 'revertir' -> status = 0 (invisible), pendiente = 1
+        let statusVal = accion === 'publicar' ? 1 : 0;
+        let pendienteVal = accion === 'publicar' ? 0 : 1;
+
+        const query = `
+            UPDATE productos 
+            SET status = ?, pendiente = ? 
+            WHERE DATE_FORMAT(LotePend, '%Y-%m-%d') = ?
+        `;
+        const [result] = await db.execute(query, [statusVal, pendienteVal, fechaLote]);
+        
+        res.json({ 
+            success: true, 
+            mensaje: `Lote ${accion === 'publicar' ? 'publicado' : 'revertido'} con éxito`,
+            actualizados: result.affectedRows 
+        });
+    } catch (e) {
+        console.error(`Error al ${accion} lote:`, e);
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// 3. Obtener los productos detallados de un lote específico
+app.get('/api/abmc/lotes/:fecha/productos', async (req, res) => {
+    const { fecha } = req.params;
+    try {
+        const query = `
+            SELECT 
+                p.Id, p.Clave, p.Descripcion, p.Precio1, 
+                p.Foto, p.status, p.Activo, p.pendiente, p.ClavePro,
+                CAST(a1.ExisPVentas AS SIGNED) as stock_disponible
+            FROM productos p
+            LEFT JOIN alm1 a1 ON p.Clave = a1.Clave
+            WHERE DATE_FORMAT(p.LotePend, '%Y-%m-%d') = ?
+            ORDER BY p.Descripcion ASC
+        `;
+        const [rows] = await db.execute(query, [fecha]);
+        res.json(rows);
+    } catch (e) {
+        console.error("Error al obtener productos del lote:", e);
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.listen(3000, '0.0.0.0', () => console.log('Servidor Factory operativo en puerto 3000'));

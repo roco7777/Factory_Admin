@@ -39,10 +39,13 @@ dependencies:
   shared_preferences: ^2.5.4
   image_picker: ^1.2.1
   screenshot: ^3.0.0
-  share_plus: ^10.1.0
-  path_provider: ^2.1.0
+  share_plus: ^10.1.4
+  path_provider: ^2.1.5
   url_launcher: ^6.3.2
   audioplayers: ^5.2.1
+  pdf: ^3.11.3
+  printing: ^5.14.2
+  path: ^1.9.1
 
 dev_dependencies:
   flutter_test:
