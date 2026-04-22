@@ -225,7 +225,7 @@ class _UIReporteHistorico extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
                     // --- CAMBIO 2: AQUÍ PUSIMOS EL EFECTIVO NETO (BLANCO PEQUEÑO) ---
-                    _itemHeader("Efectivo neto", tEN), // Antes era tE
+                    _itemHeader("Efectivo Neto", tEN), // Antes era tE
                     _itemHeader("Tarjeta", tT),
                     _itemHeader("Bancario", tB),
                   ],
@@ -382,7 +382,7 @@ class _UIReporteHistorico extends StatelessWidget {
               borderRadius: BorderRadius.circular(5),
             ),
             child: _fila(
-              "EFECTIVO NETO:",
+              "EFECTIVO A ENTREGAR:",
               c['EfectivoNeto'] ?? 0,
               azulPrimario,
               bold: true,

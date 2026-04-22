@@ -11,6 +11,7 @@ import 'historico_screen.dart';
 import 'gestion_usuarios_screen.dart';
 import 'gestion_roles_screen.dart';
 import 'lanzamientos_screen.dart'; // <--- 1. NUEVA IMPORTACIÓN
+import 'avisos_admin_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String baseUrl;
@@ -512,6 +513,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       userRole: rolUsuario, // <--- ESTO ES LO ÚNICO NUEVO AQUÍ
                     ),
                   ),
+                ),
+                // --- NUEVO BOTÓN DE AVISOS ---
+                _buildMenuCard(
+                  icon: Icons.campaign_outlined,
+                  title: "Avisos Tienda",
+                  color: Colors.amber[700]!,
+                  onTap: () =>
+                      _navegarA(AvisosAdminScreen(baseUrl: widget.baseUrl)),
                 ),
                 _buildMenuCard(
                   icon: Icons.analytics_outlined,
