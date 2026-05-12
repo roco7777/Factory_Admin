@@ -5,6 +5,8 @@ import 'package:image_picker/image_picker.dart';
 import '../core/constants.dart';
 import '../screens/ficha_producto_helper.dart';
 import '../core/security_service.dart';
+// --- IMPORTANTE: Importamos el servicio de imágenes ---
+import '../services/tienda_service.dart';
 
 class EdicionProductoScreen extends StatefulWidget {
   final String clave;
@@ -27,10 +29,10 @@ class EdicionProductoScreen extends StatefulWidget {
 class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
   bool isLoading = true, isSaving = false;
   String? fotoActual;
+  String? driveId; // --- NUEVO: Para manejar imágenes de Drive ---
 
   final TextEditingController descCtrl = TextEditingController();
-  final TextEditingController presCtrl =
-      TextEditingController(); // NUEVO: Presentacion
+  final TextEditingController presCtrl = TextEditingController();
   final TextEditingController cbCtrl = TextEditingController();
   final TextEditingController claveProCtrl = TextEditingController();
   final TextEditingController costoCtrl = TextEditingController();
@@ -43,14 +45,13 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
   final TextEditingController m2Ctrl = TextEditingController();
   final TextEditingController m3Ctrl = TextEditingController();
 
-  // NUEVOS CAMPOS DE CONTROL Y FECHAS
-  bool activoCobro = true; // Campo Activo
-  bool statusApp = true; // Campo Status
-  bool pendiente = false; // Campo Pendiente
-  DateTime? lotePend; // Campo LotePend (Fecha)
+  bool activoCobro = true;
+  bool statusApp = true;
+  bool pendiente = false;
+  DateTime? lotePend;
 
-  String fIngreso = ''; // Solo lectura
-  String ultimaVez = ''; // Solo lectura
+  String fIngreso = '';
+  String ultimaVez = '';
 
   final Map<int, TextEditingController> vCtrls = {}, bCtrls = {};
   final Map<int, bool> activoStocks = {};
@@ -77,8 +78,9 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
         final d = json.decode(res.body);
         setState(() {
           fotoActual = d['Foto'];
+          driveId = d['drive_id']?.toString(); // --- CAPTURAMOS EL DRIVE_ID ---
           descCtrl.text = d['Descripcion']?.toString() ?? '';
-          presCtrl.text = d['Presentacion']?.toString() ?? ''; // NUEVO
+          presCtrl.text = d['Presentacion']?.toString() ?? '';
           cbCtrl.text = d['CB']?.toString() ?? '';
           claveProCtrl.text = d['ClavePro']?.toString() ?? '';
           costoCtrl.text =
@@ -99,7 +101,6 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
               .toStringAsFixed(0);
           tipoCtrl.text = d['Tipo']?.toString() ?? '';
 
-          // NUEVOS VALORES
           activoCobro =
               (d['Activo'] == 1 ||
               d['Activo'] == true ||
@@ -144,7 +145,7 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
       DateTime dt = DateTime.parse(dateValue.toString());
       return "${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}";
     } catch (e) {
-      return dateValue.toString(); // Por si viene en otro formato desde MariaDB
+      return dateValue.toString();
     }
   }
 
@@ -157,7 +158,10 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
         body: json.encode({'clave': widget.clave}),
       );
       if (response.statusCode == 200) {
-        setState(() => fotoActual = null);
+        setState(() {
+          fotoActual = null;
+          driveId = null; // Limpiamos ambos
+        });
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text("🗑️ Foto eliminada")));
@@ -186,7 +190,10 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
       var responseData = await response.stream.bytesToString();
       var result = json.decode(responseData);
       if (response.statusCode == 200 && result['success']) {
-        setState(() => fotoActual = result['foto']);
+        setState(() {
+          fotoActual = result['foto'];
+          driveId = null; // Al subir una nueva local, priorizamos esa
+        });
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text("✅ Foto actualizada")));
@@ -219,7 +226,7 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
       final payload = {
         'Clave': widget.clave,
         'Descripcion': descCtrl.text.toUpperCase(),
-        'Presentacion': presCtrl.text, // NUEVO
+        'Presentacion': presCtrl.text,
         'CB': cbCtrl.text.trim(),
         'ClavePro': claveProCtrl.text.trim(),
         'PCosto': costoCtrl.text,
@@ -231,10 +238,10 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
         'Min1': m1Ctrl.text,
         'Min2': m2Ctrl.text,
         'Min3': m3Ctrl.text,
-        'Activo': activoCobro ? 1 : 0, // NUEVO
-        'Status': statusApp ? 1 : 0, // NUEVO
-        'Pendiente': pendiente ? 1 : 0, // NUEVO
-        'LotePend': lotePendStr, // NUEVO
+        'Activo': activoCobro ? 1 : 0,
+        'Status': statusApp ? 1 : 0,
+        'Pendiente': pendiente ? 1 : 0,
+        'LotePend': lotePendStr,
         'stocks': stocksMap,
       };
 
@@ -260,6 +267,7 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
     }
   }
 
+  // --- WIDGETS AUXILIARES ---
   Widget _internalNumericField(
     TextEditingController ctrl,
     String label, {
@@ -336,6 +344,13 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
     final bool can =
         esSuper || SecurityService.tienePermiso('inv_editar_basico');
 
+    // --- LÓGICA DE URL HÍBRIDA PARA LA VISTA ---
+    final String imageUrl = TiendaService.getImagenUrl(
+      driveId,
+      fotoActual,
+      widget.baseUrl,
+    );
+
     return Scaffold(
       backgroundColor: fondoGris,
       appBar: AppBar(
@@ -388,12 +403,20 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
                                     ),
                                   ],
                                 ),
-                                child: fotoActual != null
+                                child: imageUrl.isNotEmpty
                                     ? ClipRRect(
                                         borderRadius: BorderRadius.circular(23),
                                         child: Image.network(
-                                          '${widget.baseUrl}/uploads/$fotoActual?t=${DateTime.now().millisecondsSinceEpoch}',
+                                          // Agregamos timestamp para evitar caché al actualizar
+                                          imageUrl.contains('drive.google')
+                                              ? imageUrl
+                                              : '$imageUrl?t=${DateTime.now().millisecondsSinceEpoch}',
                                           fit: BoxFit.cover,
+                                          errorBuilder: (c, e, s) => const Icon(
+                                            Icons.image_not_supported,
+                                            size: 50,
+                                            color: Colors.grey,
+                                          ),
                                         ),
                                       )
                                     : const Icon(
@@ -418,7 +441,7 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
                       ),
                       const SizedBox(height: 30),
 
-                      // --- INFORMACIÓN BÁSICA ---
+                      // --- CAMPOS (Resto del formulario igual) ---
                       _sectionTitle("INFORMACIÓN BÁSICA"),
                       TextFormField(
                         controller: descCtrl,
@@ -463,7 +486,6 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
                       ),
                       const SizedBox(height: 30),
 
-                      // --- ESTADO Y VISIBILIDAD ---
                       _sectionTitle("ESTADO Y OPERATIVIDAD"),
                       Container(
                         decoration: BoxDecoration(
@@ -506,9 +528,7 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
                                   ? (val) {
                                       setState(() {
                                         statusApp = val;
-                                        if (val)
-                                          pendiente =
-                                              false; // Si lo hago visible, apago pendiente
+                                        if (val) pendiente = false;
                                       });
                                     }
                                   : null,
@@ -532,9 +552,7 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
                                   ? (val) {
                                       setState(() {
                                         pendiente = val;
-                                        if (val)
-                                          statusApp =
-                                              false; // Si lo pongo pendiente, apago status
+                                        if (val) statusApp = false;
                                       });
                                     }
                                   : null,
@@ -569,9 +587,8 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
                                           ),
                                           lastDate: DateTime(2030),
                                         );
-                                        if (picked != null) {
+                                        if (picked != null)
                                           setState(() => lotePend = picked);
-                                        }
                                       }
                                     : null,
                               ),
@@ -581,7 +598,6 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
                       ),
                       const SizedBox(height: 30),
 
-                      // --- COSTOS Y PRECIOS ---
                       _sectionTitle("COSTOS Y RENTABILIDAD"),
                       Row(
                         children: [
@@ -614,7 +630,6 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
                       if (puedeVerCostos) _internalUtilidad(p3Ctrl, costoCtrl),
                       const SizedBox(height: 30),
 
-                      // --- EXISTENCIAS ---
                       _sectionTitle("CONTROL DE EXISTENCIAS"),
                       Container(
                         padding: const EdgeInsets.all(15),
@@ -632,7 +647,6 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
                       ),
                       const SizedBox(height: 30),
 
-                      // --- FECHAS DEL SISTEMA (SOLO LECTURA) ---
                       _sectionTitle("INFORMACIÓN DEL SISTEMA"),
                       Container(
                         width: double.infinity,
@@ -674,6 +688,7 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
     );
   }
 
+  // --- MÉTODOS DE ESTILO ---
   Widget _sectionTitle(String text) => Padding(
     padding: const EdgeInsets.only(bottom: 15, left: 5),
     child: Text(
@@ -686,7 +701,6 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
       ),
     ),
   );
-
   InputDecoration _inputStyle(String label, IconData icon) => InputDecoration(
     labelText: label,
     prefixIcon: Icon(icon, color: azulAcento),
@@ -695,7 +709,6 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
     isDense: true,
   );
-
   Widget _priceRow(
     TextEditingController p,
     TextEditingController m,
@@ -708,34 +721,30 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
       _internalNumericField(m, "Mínimo", enabled: can),
     ],
   );
-
-  Widget _buildStockRow(int i, bool can) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 70,
-            child: Text(
-              widget.sucursalNames[i - 1],
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
-            ),
+  Widget _buildStockRow(int i, bool can) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 8),
+    child: Row(
+      children: [
+        SizedBox(
+          width: 70,
+          child: Text(
+            widget.sucursalNames[i - 1],
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
           ),
-          _internalNumericField(vCtrls[i]!, "Pzas", enabled: can),
-          const SizedBox(width: 5),
-          _internalNumericField(bCtrls[i]!, "Bodega", enabled: can),
-          Switch(
-            value: activoStocks[i]!,
-            activeColor: azulPrimario,
-            onChanged: can
-                ? (val) => setState(() => activoStocks[i] = val)
-                : null,
-          ),
-        ],
-      ),
-    );
-  }
-
+        ),
+        _internalNumericField(vCtrls[i]!, "Pzas", enabled: can),
+        const SizedBox(width: 5),
+        _internalNumericField(bCtrls[i]!, "Bodega", enabled: can),
+        Switch(
+          value: activoStocks[i]!,
+          activeColor: azulPrimario,
+          onChanged: can
+              ? (val) => setState(() => activoStocks[i] = val)
+              : null,
+        ),
+      ],
+    ),
+  );
   Widget _loadingOverlay() => Container(
     color: azulPrimario.withOpacity(0.8),
     child: const Center(
@@ -787,7 +796,7 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
                   _seleccionarFoto(ImageSource.gallery);
                 },
               ),
-              if (fotoActual != null)
+              if (fotoActual != null || driveId != null)
                 ListTile(
                   leading: const Icon(
                     Icons.delete_sweep_rounded,

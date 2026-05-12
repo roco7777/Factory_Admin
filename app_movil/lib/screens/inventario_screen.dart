@@ -5,18 +5,21 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'dart:io';
 
-// --- NUEVAS IMPORTACIONES PARA COMPARTIR ---
+// --- COMPARTIR ---
 import 'package:screenshot/screenshot.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 
-// --- IMPORTACIONES LIMPIAS ---
+// --- NÚCLEO Y SERVICIOS ---
 import '../core/constants.dart';
-import '../widgets/scanner_screen.dart';
-import 'edicion_producto_screen.dart';
+import '../services/tienda_service.dart';
+
+// --- PANTALLAS Y WIDGETS ---
+import '../widgets/scanner_screen.dart'; // <--- El scanner vive aquí
+import 'edicion_producto_screen.dart'; // <--- Usaremos este nombre
 import 'nuevo_producto_screen.dart';
-import 'ficha_producto_helper.dart';
+import 'detalle_producto_screen.dart';
 import 'admin_login_screen.dart';
 
 class PantallaInventario extends StatefulWidget {
@@ -311,6 +314,7 @@ class _PantallaInventarioState extends State<PantallaInventario> {
       ),
       body: Column(
         children: [
+          // --- SECCIÓN BUSCADOR ---
           Container(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
             decoration: const BoxDecoration(
@@ -337,9 +341,9 @@ class _PantallaInventarioState extends State<PantallaInventario> {
                   borderSide: BorderSide.none,
                 ),
                 prefixIcon: IconButton(
-                  icon: Icon(
+                  icon: const Icon(
                     Icons.qr_code_scanner_rounded,
-                    color: azulAcento.withOpacity(0.7),
+                    color: azulPrimario,
                   ),
                   onPressed: () async {
                     final res = await showDialog<String>(
@@ -354,15 +358,14 @@ class _PantallaInventarioState extends State<PantallaInventario> {
                 ),
                 suffixIcon: IconButton(
                   icon: const Icon(Icons.search_rounded, color: azulPrimario),
-                  onPressed: () {
-                    buscarProductos();
-                  },
+                  onPressed: () => buscarProductos(),
                 ),
               ),
               onSubmitted: (_) => buscarProductos(),
             ),
           ),
 
+          // --- LISTADO DE RESULTADOS ---
           Expanded(
             child: cargando
                 ? const Center(
@@ -394,7 +397,183 @@ class _PantallaInventarioState extends State<PantallaInventario> {
                     itemCount: productos.length,
                     itemBuilder: (context, index) {
                       final item = productos[index];
-                      return _buildProductoCard(item);
+
+                      return Dismissible(
+                        key: Key(item['Id'].toString()),
+                        direction: DismissDirection.startToEnd,
+                        background: Container(
+                          margin: const EdgeInsets.symmetric(
+                            vertical: 8,
+                            horizontal: 16,
+                          ),
+                          decoration: BoxDecoration(
+                            color: azulAcento,
+                            borderRadius: BorderRadius.circular(15),
+                          ),
+                          alignment: Alignment.centerLeft,
+                          padding: const EdgeInsets.only(left: 20),
+                          child: const Icon(
+                            Icons.edit_rounded,
+                            color: Colors.white,
+                            size: 30,
+                          ),
+                        ),
+                        confirmDismiss: (direction) async {
+                          // Navegar a Edición mediante Swipe
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => EdicionProductoScreen(
+                                clave: item['Clave'].toString().trim(),
+                                baseUrl: widget.baseUrl,
+                                userRole: widget.userRole,
+                                sucursalNames: sucursalNames,
+                              ),
+                            ),
+                          ).then((_) => buscarProductos());
+                          return false; // Evita que se elimine de la lista visual
+                        },
+                        child: Card(
+                          margin: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(15),
+                          ),
+                          elevation: 2,
+                          child: ListTile(
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 12,
+                            ),
+                            leading: ClipRRect(
+                              borderRadius: BorderRadius.circular(8),
+                              child: SizedBox(
+                                width: 60,
+                                height: 60,
+                                child: Image.network(
+                                  TiendaService.getImagenUrl(
+                                    item['drive_id']?.toString(),
+                                    item['Foto']?.toString(),
+                                    widget.baseUrl,
+                                  ),
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) =>
+                                      const Icon(
+                                        Icons.inventory_2,
+                                        color: Colors.grey,
+                                      ),
+                                ),
+                              ),
+                            ),
+                            // 1. Título con hasta 2 líneas para el nombre
+                            title: Text(
+                              item['Descripcion'] ?? "Sin descripción",
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: azulPrimario,
+                                fontSize: 14,
+                                height: 1.2,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const SizedBox(height: 6),
+                                // 2. Clave y ClavePro en negro y misma línea
+                                Row(
+                                  children: [
+                                    Text(
+                                      "Clave: ${item['Clave']}",
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.black,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        "Prov: ${item['ClavePro'] ?? 'N/A'}",
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.black87,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 10),
+                                // 3. Desglose de Stock por Sucursal
+                                Row(
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
+                                  children: List.generate(
+                                    sucursalNames.length,
+                                    (i) {
+                                      String stockValue =
+                                          item['stock${i + 1}']?.toString() ??
+                                          '0';
+                                      bool hasStock =
+                                          (double.tryParse(stockValue) ?? 0) >
+                                          0;
+                                      return Column(
+                                        children: [
+                                          Text(
+                                            stockValue,
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.bold,
+                                              color: hasStock
+                                                  ? verdeExito
+                                                  : Colors.red[300],
+                                            ),
+                                          ),
+                                          Text(
+                                            sucursalNames[i].length > 5
+                                                ? sucursalNames[i].substring(
+                                                    0,
+                                                    5,
+                                                  )
+                                                : sucursalNames[i],
+                                            style: const TextStyle(
+                                              fontSize: 7,
+                                              color: Colors.blueGrey,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ],
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
+                            trailing: const Icon(
+                              Icons.chevron_right_rounded,
+                              color: grisBordes,
+                            ),
+                            onTap: () {
+                              // Ir a Detalle de Producto al Tocar
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => DetalleProductoScreen(
+                                    item: item,
+                                    baseUrl: widget.baseUrl,
+                                    sucursalNames: sucursalNames,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      );
                     },
                   ),
           ),

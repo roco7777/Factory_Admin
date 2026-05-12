@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart'; // <--- Agrega esto al principio
+import 'package:url_launcher/url_launcher.dart';
 
 class TiendaService {
   // 1. Obtener Categorías
@@ -10,21 +11,23 @@ class TiendaService {
     throw Exception("Error al cargar categorías");
   }
 
-  // 2. Obtener Inventario (Paginación + Semilla MariaDB)
-  static Future<List<dynamic>> fetchInventario({
+  // 2. Obtener Inventario (Híbrido: Búsqueda Potente + Filtro de Tipo)
+  static Future<List<dynamic>> fetchInventarioAdmin({
     required String baseUrl,
     String query = "",
     int page = 0,
-    required int idSuc,
-    required int seed,
   }) async {
-    final res = await http.get(
-      Uri.parse(
-        '$baseUrl/api/inventario?q=$query&page=$page&idSuc=$idSuc&seed=$seed',
-      ),
-    );
-    if (res.statusCode == 200) return json.decode(res.body);
-    throw Exception("Error al cargar inventario");
+    final String q = query.trim();
+    // Apuntamos a la ruta de ADMIN que muestra activos e inactivos
+    String url =
+        '$baseUrl/api/admin/inventario?page=$page&q=${Uri.encodeComponent(q)}';
+
+    final res = await http.get(Uri.parse(url));
+
+    if (res.statusCode == 200) {
+      return json.decode(res.body);
+    }
+    throw Exception("Error en servidor Admin: ${res.statusCode}");
   }
 
   // 3. Obtener Sucursales (Almacenes)
@@ -122,6 +125,27 @@ class TiendaService {
     return json.decode(res.body);
   }
 
+  // 9. Nuevo método para formatear la URL de Google Drive
+  // En lib/services/tienda_service.dart
+  static String getImagenUrl(
+    String? driveId,
+    String? fotoLocal,
+    String baseUrl,
+  ) {
+    // 1. Prioridad: Google Drive
+    if (driveId != null && driveId.isNotEmpty && driveId != 'null') {
+      return "https://lh3.googleusercontent.com/d/$driveId=h1000";
+    }
+
+    // 2. Respaldo: Imagen local en el servidor (Carpeta uploads)
+    if (fotoLocal != null && fotoLocal.isNotEmpty && fotoLocal != 'null') {
+      return "$baseUrl/uploads/$fotoLocal";
+    }
+
+    // 3. Fallback: Sin imagen
+    return "";
+  }
+
   //obtener url remota
   // El error era el espacio entre 'baseUrl' y 'Actual'
   static Future<String?> obtenerUrlRemota(String baseUrlActual) async {
@@ -138,5 +162,43 @@ class TiendaService {
       debugPrint("No se pudo verificar URL remota: $e");
     }
     return null;
+  }
+
+  // Método centralizado para soporte vía WhatsApp
+  static Future<void> contactarSoporteWhatsApp(
+    String baseUrl, {
+    String? mensajePersonalizado,
+  }) async {
+    try {
+      // Reutilizamos la lógica de obtener el número desde la base de datos
+      final res = await http.get(Uri.parse('$baseUrl/api/config/soporte'));
+
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        String numeroSoporte =
+            data['telefono'] ??
+            data['TelSoporte'] ??
+            "529631320318"; // Respaldo por si acaso
+
+        // Limpiamos el número de caracteres no numéricos
+        numeroSoporte = numeroSoporte.replaceAll(RegExp(r'\D'), '');
+
+        // Aseguramos el código de país para México si no lo tiene
+        if (!numeroSoporte.startsWith('52')) numeroSoporte = '52$numeroSoporte';
+
+        String mensaje =
+            mensajePersonalizado ??
+            "Hola Factory Mayoreo, necesito ayuda con la App.";
+
+        final url =
+            "https://wa.me/$numeroSoporte?text=${Uri.encodeComponent(mensaje)}";
+
+        if (await canLaunchUrl(Uri.parse(url))) {
+          await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+        }
+      }
+    } catch (e) {
+      debugPrint("Error al contactar soporte: $e");
+    }
   }
 }

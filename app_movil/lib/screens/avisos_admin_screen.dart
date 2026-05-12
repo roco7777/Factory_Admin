@@ -39,20 +39,19 @@ class _AvisosAdminScreenState extends State<AvisosAdminScreen> {
     }
   }
 
-  void _abrirEditor({dynamic aviso}) {
-    showModalBottomSheet(
+  void _abrirEditor({dynamic aviso}) async {
+    // Esperamos a ver si el modal nos devuelve 'true' (significa que hubo cambios)
+    final bool? huboCambio = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => EditorAvisoModal(
-        baseUrl: widget.baseUrl,
-        avisoExistente: aviso,
-        onGuardar: () {
-          Navigator.pop(context);
-          _cargarAvisos();
-        },
-      ),
+      builder: (context) =>
+          EditorAvisoModal(baseUrl: widget.baseUrl, avisoExistente: aviso),
     );
+
+    if (huboCambio == true) {
+      _cargarAvisos(); // Refrescamos la lista automáticamente
+    }
   }
 
   @override
@@ -132,21 +131,22 @@ class _AvisosAdminScreenState extends State<AvisosAdminScreen> {
 
   Color _parseColor(String? hex) {
     if (hex == null || hex.isEmpty) return Colors.yellow[200]!;
-    return Color(int.parse(hex.replaceFirst('#', 'ff'), radix: 16));
+    try {
+      return Color(int.parse(hex.replaceFirst('#', 'ff'), radix: 16));
+    } catch (e) {
+      return Colors.yellow[200]!;
+    }
   }
 }
 
-// --- MODAL DEL EDITOR ---
 class EditorAvisoModal extends StatefulWidget {
   final String baseUrl;
   final dynamic avisoExistente;
-  final VoidCallback onGuardar;
 
   const EditorAvisoModal({
     super.key,
     required this.baseUrl,
     this.avisoExistente,
-    required this.onGuardar,
   });
 
   @override
@@ -179,28 +179,75 @@ class _EditorAvisoModalState extends State<EditorAvisoModal> {
   }
 
   Future<void> _seleccionarFechaHora() async {
+    DateTime hoy = DateTime.now();
+    // Lógica para que el calendario no truene si el aviso es viejo
+    DateTime primerDia = _fechaFin.isBefore(hoy) ? _fechaFin : hoy;
+
     final date = await showDatePicker(
       context: context,
       initialDate: _fechaFin,
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
+      firstDate: primerDia,
+      lastDate: hoy.add(const Duration(days: 365)),
+      locale: const Locale('es', 'MX'),
     );
-    if (date != null) {
-      final time = await showTimePicker(
-        context: context,
-        initialTime: TimeOfDay.fromDateTime(_fechaFin),
+    if (date == null) return;
+
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(_fechaFin),
+    );
+    if (time != null) {
+      setState(() {
+        _fechaFin = DateTime(
+          date.year,
+          date.month,
+          date.day,
+          time.hour,
+          time.minute,
+        );
+      });
+    }
+  }
+
+  Future<void> _confirmarEliminacion(int idAviso) async {
+    bool? confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("¿Eliminar aviso?"),
+        content: const Text("Esta acción quitará el aviso permanentemente."),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text("CANCELAR"),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              "ELIMINAR",
+              style: TextStyle(color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar != true) return;
+
+    setState(() => _guardando = true);
+    try {
+      final res = await http.delete(
+        Uri.parse('${widget.baseUrl}/api/admin/avisos/$idAviso'),
       );
-      if (time != null) {
-        setState(() {
-          _fechaFin = DateTime(
-            date.year,
-            date.month,
-            date.day,
-            time.hour,
-            time.minute,
-          );
-        });
+      if (res.statusCode == 200) {
+        if (mounted) Navigator.pop(context, true); // Cerramos con éxito
+      } else {
+        debugPrint("Error del servidor al eliminar: ${res.statusCode}");
       }
+    } catch (e) {
+      debugPrint("Error: $e");
+    } finally {
+      if (mounted) setState(() => _guardando = false);
     }
   }
 
@@ -233,11 +280,13 @@ class _EditorAvisoModalState extends State<EditorAvisoModal> {
               body: json.encode(datos),
             ));
 
-      if (res.statusCode == 200) widget.onGuardar();
+      if (res.statusCode == 200) {
+        if (mounted) Navigator.pop(context, true); // Cerramos con éxito
+      }
     } catch (e) {
       debugPrint("Error guardando: $e");
     } finally {
-      setState(() => _guardando = false);
+      if (mounted) setState(() => _guardando = false);
     }
   }
 
@@ -259,31 +308,69 @@ class _EditorAvisoModalState extends State<EditorAvisoModal> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              widget.avisoExistente == null ? "Nuevo Aviso" : "Editar Aviso",
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  widget.avisoExistente == null
+                      ? "Nuevo Aviso"
+                      : "Editar Aviso",
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                if (widget.avisoExistente != null)
+                  IconButton(
+                    icon: const Icon(
+                      Icons.delete_forever,
+                      color: Colors.redAccent,
+                      size: 28,
+                    ),
+                    onPressed: () =>
+                        _confirmarEliminacion(widget.avisoExistente!['id']),
+                  ),
+              ],
             ),
             const SizedBox(height: 20),
             TextField(
               controller: _msgCtrl,
               maxLines: 3,
               maxLength: 150,
+              textCapitalization: TextCapitalization.sentences,
               decoration: const InputDecoration(
                 labelText: "Mensaje del aviso",
                 border: OutlineInputBorder(),
-                hintText: "Ej. 10% de descuento hoy...",
+                alignLabelWithHint: true,
               ),
             ),
             const SizedBox(height: 10),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.event),
-              title: const Text("Fecha y hora de finalización"),
-              subtitle: Text(DateFormat('dd/MM/yyyy HH:mm').format(_fechaFin)),
-              trailing: const Icon(Icons.edit),
-              onTap: _seleccionarFechaHora,
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: ListTile(
+                leading: const Icon(
+                  Icons.event_available,
+                  color: Colors.blueGrey,
+                ),
+                title: const Text(
+                  "Finaliza el:",
+                  style: TextStyle(fontSize: 12),
+                ),
+                subtitle: Text(
+                  DateFormat('dd/MM/yyyy HH:mm').format(_fechaFin),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                trailing: const Icon(Icons.edit_calendar, color: Colors.blue),
+                onTap: _seleccionarFechaHora,
+              ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 20),
             const Text(
               "Color de fondo",
               style: TextStyle(fontWeight: FontWeight.bold),
@@ -297,41 +384,51 @@ class _EditorAvisoModalState extends State<EditorAvisoModal> {
                   onTap: () => setState(() => _colorSeleccionado = c['hex']),
                   child: Container(
                     width: 60,
-                    height: 40,
+                    height: 45,
                     decoration: BoxDecoration(
                       color: c['color'],
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(12),
                       border: sel
-                          ? Border.all(color: Colors.black, width: 2)
-                          : null,
+                          ? Border.all(color: Colors.black, width: 2.5)
+                          : Border.all(
+                              color: Colors.grey.withOpacity(0.2),
+                              width: 1,
+                            ),
                     ),
-                    child: sel ? const Icon(Icons.check, size: 20) : null,
+                    child: sel
+                        ? const Icon(Icons.check, color: Colors.black)
+                        : null,
                   ),
                 );
               }).toList(),
             ),
             const SizedBox(height: 20),
             SwitchListTile(
-              title: const Text("Aviso activo"),
+              contentPadding: EdgeInsets.zero,
+              title: const Text(
+                "Mostrar aviso en la App",
+                style: TextStyle(fontWeight: FontWeight.w500),
+              ),
+              activeColor: Colors.green,
               value: _activo,
               onChanged: (val) => setState(() => _activo = val),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 25),
             SizedBox(
               width: double.infinity,
-              height: 50,
+              height: 55,
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.blueGrey[900],
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(15),
                   ),
                 ),
                 onPressed: _guardando ? null : _guardar,
                 child: _guardando
                     ? const CircularProgressIndicator(color: Colors.white)
                     : const Text(
-                        "GUARDAR AVISO",
+                        "GUARDAR CAMBIOS",
                         style: TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
@@ -339,7 +436,7 @@ class _EditorAvisoModalState extends State<EditorAvisoModal> {
                       ),
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 30),
           ],
         ),
       ),

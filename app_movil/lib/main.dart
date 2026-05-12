@@ -6,6 +6,7 @@ import 'screens/admin_login_screen.dart'; // <--- CORREGIDO: Importamos el login
 import 'package:factory_admin/services/tienda_service.dart';
 import 'screens/dashboard_screen.dart';
 import '../core/security_service.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,6 +28,14 @@ class MiNegocioApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      localizationsDelegates: [
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: [
+        const Locale('es', 'MX'), // Español México
+      ],
       debugShowCheckedModeBanner: false,
       title: 'Factory POS Admin',
       // En MiNegocioApp dentro de main.dart

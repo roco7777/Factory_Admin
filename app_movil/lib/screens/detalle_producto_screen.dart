@@ -1,227 +1,339 @@
 import 'package:flutter/material.dart';
+import 'dart:io';
+import 'package:screenshot/screenshot.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as path;
 
-class DetalleProductoScreen extends StatelessWidget {
+import '../services/tienda_service.dart';
+import 'edicion_producto_screen.dart';
+
+class DetalleProductoScreen extends StatefulWidget {
   final dynamic item;
   final String baseUrl;
-  final Function(dynamic) onAgregarTap;
+  final List<String> sucursalNames;
 
   const DetalleProductoScreen({
     super.key,
     required this.item,
     required this.baseUrl,
-    required this.onAgregarTap,
+    required this.sucursalNames,
   });
 
   @override
+  State<DetalleProductoScreen> createState() => _DetalleProductoScreenState();
+}
+
+class _DetalleProductoScreenState extends State<DetalleProductoScreen> {
+  final ScreenshotController screenshotController = ScreenshotController();
+
+  // --- 1. FUNCIONES DE APOYO (Solo una declaración de cada una) ---
+
+  String formatPrecio(dynamic valor) {
+    if (valor == null ||
+        valor.toString() == 'null' ||
+        valor.toString().isEmpty) {
+      return "0.00";
+    }
+    double monto = double.tryParse(valor.toString()) ?? 0;
+    return monto.toStringAsFixed(2);
+  }
+
+  String calcularUtilidad(dynamic precio, double costoBase) {
+    double p = double.tryParse(precio?.toString() ?? '0') ?? 0;
+    if (costoBase <= 0 || p <= 0) return "0%";
+    double utilidad = ((p - costoBase) / costoBase) * 100;
+    return "${utilidad.toStringAsFixed(1)}%";
+  }
+
+  // --- 2. LÓGICA DE EXPORTACIÓN ---
+
+  Future<void> _exportarFicha() async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(child: CircularProgressIndicator()),
+    );
+
+    final item = widget.item;
+    String descripcion = item['Descripcion']?.toString().toUpperCase() ?? '';
+    String clave = item['Clave']?.toString() ?? '';
+
+    final String imageUrl = TiendaService.getImagenUrl(
+      item['drive_id']?.toString(),
+      item['Foto']?.toString(),
+      widget.baseUrl,
+    );
+
+    Widget fichaVisual = Container(
+      width: 450,
+      color: Colors.white,
+      padding: const EdgeInsets.all(25),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (imageUrl.isNotEmpty)
+            Image.network(imageUrl, height: 300, fit: BoxFit.contain)
+          else
+            const Icon(
+              Icons.image_not_supported,
+              size: 150,
+              color: Colors.grey,
+            ),
+          const SizedBox(height: 20),
+          Text(
+            descripcion,
+            style: const TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1A237E),
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 10),
+          Text(
+            "CLAVE: $clave",
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.black54,
+            ),
+          ),
+          const Divider(height: 30, thickness: 2),
+          _filaPrecioFicha("Precio Público:", item['Precio1']),
+          _filaPrecioFicha("Precio Mayoreo:", item['Precio2']),
+          _filaPrecioFicha("Precio Especial:", item['Precio3']),
+        ],
+      ),
+    );
+
+    try {
+      final uint8list = await screenshotController.captureFromWidget(
+        Material(child: fichaVisual),
+        delay: const Duration(milliseconds: 250),
+      );
+
+      final directory = await getTemporaryDirectory();
+      final imagePath = await File(
+        path.join(directory.path, '${clave}_ficha.png'),
+      ).create();
+      await imagePath.writeAsBytes(uint8list);
+
+      if (!mounted) return;
+      Navigator.pop(context);
+
+      await Share.shareXFiles([
+        XFile(imagePath.path),
+      ], text: 'Cotización Factory: $descripcion');
+    } catch (e) {
+      if (mounted) Navigator.pop(context);
+      debugPrint("Error exportando: $e");
+    }
+  }
+
+  Widget _filaPrecioFicha(String label, dynamic valor) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(fontSize: 16)),
+          Text(
+            "\$${formatPrecio(valor)}",
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1A237E),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- 3. DISEÑO DE LA PANTALLA ---
+
+  @override
   Widget build(BuildContext context) {
-    String productDesc = item['product_desc']?.toString() ?? "";
+    final item = widget.item;
+    final String imageUrl = TiendaService.getImagenUrl(
+      item['drive_id']?.toString(),
+      item['Foto']?.toString(),
+      widget.baseUrl,
+    );
 
-    double p1 = double.tryParse(item['Precio1']?.toString() ?? '0') ?? 0;
-    double p2 = double.tryParse(item['Precio2']?.toString() ?? '0') ?? 0;
-    double p3 = double.tryParse(item['Precio3']?.toString() ?? '0') ?? 0;
-
-    int m1 = (double.tryParse(item['Min1']?.toString() ?? '1') ?? 1).toInt();
-    int m2 = (double.tryParse(item['Min2']?.toString() ?? '0') ?? 0).toInt();
-    int m3 = (double.tryParse(item['Min3']?.toString() ?? '0') ?? 0).toInt();
-
-    int preciosActivos = (p1 > 0 ? 1 : 0) + (p2 > 0 ? 1 : 0) + (p3 > 0 ? 1 : 0);
-    String imageUrl = (item['Foto'] != null && item['Foto'] != "")
-        ? '$baseUrl/uploads/${item['Foto']}'
-        : "";
+    double costoBase = double.tryParse(item['PCosto']?.toString() ?? '0') ?? 0;
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xFFF4F5F7),
       appBar: AppBar(
-        title: const Text("Detalle de Producto"),
-        backgroundColor: Colors.red[800],
+        title: const Text("Análisis de Producto"),
+        backgroundColor: const Color(0xFF1A237E),
         foregroundColor: Colors.white,
-        elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.share_rounded),
+            onPressed: _exportarFicha,
+            tooltip: "Compartir Ficha",
+          ),
+          IconButton(
+            icon: const Icon(Icons.edit_note),
+            onPressed: () => _irAEditar(context),
+          ),
+        ],
       ),
       body: SingleChildScrollView(
-        physics: const BouncingScrollPhysics(),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // --- SECCIÓN FOTO ESTÁTICA (TOCA PARA ABRIR) ---
             GestureDetector(
-              onTap: () {
-                if (imageUrl.isNotEmpty) {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => FullScreenImageView(
-                        imageUrl: imageUrl,
-                        clave: item['Clave'],
-                      ),
-                    ),
-                  );
-                }
-              },
-              child: Stack(
-                alignment: Alignment.bottomRight,
-                children: [
-                  Container(
-                    width: double.infinity,
-                    height: 380,
+              onTap: () => _abrirZoom(imageUrl, item['Clave']),
+              child: Hero(
+                tag: 'product_image_${item['Clave']}',
+                child: Container(
+                  height: 320,
+                  width: double.infinity,
+                  decoration: const BoxDecoration(
                     color: Colors.white,
-                    child: imageUrl.isNotEmpty
-                        // Usamos Hero para una animación de transición suave
-                        ? Hero(
-                            tag: 'product_image_${item['Id'] ?? item['Clave']}',
-                            child: Image.network(imageUrl, fit: BoxFit.contain),
-                          )
-                        : const Icon(
-                            Icons.image,
-                            size: 100,
-                            color: Colors.grey,
-                          ),
-                  ),
-                  // Indicador visual de que se puede ampliar
-                  if (imageUrl.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.all(12.0),
-                      child: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.black54,
-                          borderRadius: BorderRadius.circular(30),
-                        ),
-                        child: const Icon(
-                          Icons.zoom_in,
-                          color: Colors.white,
-                          size: 24,
-                        ),
-                      ),
+                    borderRadius: BorderRadius.only(
+                      bottomLeft: Radius.circular(30),
+                      bottomRight: Radius.circular(30),
                     ),
-                ],
+                  ),
+                  child: imageUrl.isNotEmpty
+                      ? Image.network(imageUrl, fit: BoxFit.contain)
+                      : const Icon(
+                          Icons.image_not_supported,
+                          size: 100,
+                          color: Colors.grey,
+                        ),
+                ),
               ),
             ),
-
             Padding(
               padding: const EdgeInsets.all(20.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Nombre del Producto (Tamaño 18)
                   Text(
-                    item['Descripcion'] ?? "",
+                    item['Descripcion'] ?? "SIN NOMBRE",
                     style: const TextStyle(
-                      fontSize: 18,
+                      fontSize: 22,
                       fontWeight: FontWeight.bold,
-                      color: Colors.black87,
+                      color: Color(0xFF263238),
                     ),
                   ),
-
-                  // Clave del Producto
-                  const SizedBox(height: 4),
                   Text(
-                    "Clave: ${item['Clave'] ?? 'N/A'}",
+                    "Clave: ${item['Clave']}",
                     style: const TextStyle(
-                      fontSize: 13,
-                      color: Colors.black54,
-                      fontWeight: FontWeight.w500,
+                      fontSize: 16,
+                      color: Colors.blueGrey,
                     ),
                   ),
-
-                  const SizedBox(height: 15),
-
-                  // Información Adicional
-                  if (productDesc.isNotEmpty && productDesc != "null") ...[
-                    const Text(
-                      "INFORMACIÓN ADICIONAL",
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.grey,
-                        fontSize: 11,
-                        letterSpacing: 1.1,
+                  const SizedBox(height: 25),
+                  const Row(
+                    children: [
+                      Icon(
+                        Icons.analytics_outlined,
+                        size: 18,
+                        color: Color(0xFF1A237E),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      productDesc,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        color: Colors.black87,
-                        height: 1.4,
+                      SizedBox(width: 8),
+                      Text(
+                        "MÁRGENES DE UTILIDAD",
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                          color: Color(0xFF1A237E),
+                        ),
                       ),
-                    ),
-                  ],
-
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 15),
-                    child: Divider(color: Colors.black12),
+                    ],
                   ),
-
-                  // --- SECCIÓN DE PRECIOS ---
+                  const SizedBox(height: 10),
+                  Container(
+                    padding: const EdgeInsets.all(15),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(15),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.05),
+                          blurRadius: 10,
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      children: [
+                        _filaPrecioUtilidad(
+                          "Costo Base (P.Costo):",
+                          "\$${costoBase.toStringAsFixed(2)}",
+                          "COSTO",
+                          Colors.blueGrey,
+                        ),
+                        const Divider(height: 20),
+                        _filaPrecioUtilidad(
+                          "Precio 1 (Público):",
+                          "\$${formatPrecio(item['Precio1'])}",
+                          calcularUtilidad(item['Precio1'], costoBase),
+                          Colors.black87,
+                        ),
+                        _filaPrecioUtilidad(
+                          "Precio 2:",
+                          "\$${formatPrecio(item['Precio2'])}",
+                          calcularUtilidad(item['Precio2'], costoBase),
+                          Colors.black87,
+                        ),
+                        _filaPrecioUtilidad(
+                          "Precio 3:",
+                          "\$${formatPrecio(item['Precio3'])}",
+                          calcularUtilidad(item['Precio3'], costoBase),
+                          Colors.black87,
+                        ),
+                        _filaPrecioUtilidad(
+                          "Precio 4:",
+                          "\$${formatPrecio(item['Precio4'])}",
+                          calcularUtilidad(item['Precio4'], costoBase),
+                          Colors.black87,
+                        ),
+                        _filaPrecioUtilidad(
+                          "Precio 5:",
+                          "\$${formatPrecio(item['Precio5'])}",
+                          calcularUtilidad(item['Precio5'], costoBase),
+                          Colors.black87,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 25),
                   const Text(
-                    "LISTA DE PRECIOS",
+                    "STOCKS POR SUCURSAL",
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: Colors.grey,
-                      fontSize: 11,
+                      fontSize: 13,
+                      color: Color(0xFF1A237E),
                     ),
                   ),
                   const SizedBox(height: 10),
-
-                  if (preciosActivos == 1)
-                    _buildFilaPrecio("Precio:", p1, Colors.red, 22)
-                  else ...[
-                    if (p1 > 0)
-                      _buildFilaPrecio(
-                        "A partir de $m1 pzas:",
-                        p1,
-                        Colors.red,
-                        20,
+                  _buildStockHorizontal(item),
+                  const SizedBox(height: 40),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1A237E),
+                      minimumSize: const Size(double.infinity, 55),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(15),
                       ),
-                    if (p2 > 0)
-                      _buildFilaPrecio(
-                        "A partir de $m2 pzas:",
-                        p2,
-                        Colors.green[700]!,
-                        20,
-                      ),
-                    if (p3 > 0)
-                      _buildFilaPrecio(
-                        "A partir de $m3 pzas:",
-                        p3,
-                        Colors.blue[700]!,
-                        20,
-                      ),
-                  ],
-
-                  const SizedBox(height: 30),
-
-                  // --- BOTÓN AGREGAR AL PEDIDO ---
-                  SizedBox(
-                    width: double.infinity,
-                    height: 55,
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        onAgregarTap(item);
-                      },
-                      icon: const Icon(
-                        Icons.shopping_cart_checkout,
+                    ),
+                    onPressed: () => _irAEditar(context),
+                    icon: const Icon(Icons.edit, color: Colors.white),
+                    label: const Text(
+                      "MODIFICAR ESTE PRODUCTO",
+                      style: TextStyle(
                         color: Colors.white,
-                      ),
-                      label: const Text(
-                        "AGREGAR AL PEDIDO",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red[800],
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        elevation: 4,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
                   ),
-                  const SizedBox(height: 30),
+                  const SizedBox(height: 20),
                 ],
               ),
             ),
@@ -231,70 +343,154 @@ class DetalleProductoScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildFilaPrecio(
-    String label,
-    double price,
-    Color color,
-    double size,
-  ) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+  // --- 4. WIDGETS DE COMPONENTES ---
+
+  Widget _buildStockHorizontal(dynamic item) {
+    return Container(
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(15),
+      ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: List.generate(widget.sucursalNames.length, (index) {
+          String stockKey = 'stock${index + 1}';
+          return Expanded(
+            child: Column(
+              children: [
+                Text(
+                  item[stockKey]?.toString() ?? '0',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 18,
+                    color: Color(0xFF1A237E),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  widget.sucursalNames[index],
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 8,
+                    color: Colors.grey,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          );
+        }),
+      ),
+    );
+  }
+
+  Widget _filaPrecioUtilidad(
+    String label,
+    String precio,
+    String utilidad,
+    Color color,
+  ) {
+    bool esCosto = utilidad == "COSTO";
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
         children: [
-          Text(
-            label,
-            style: const TextStyle(fontSize: 14, color: Colors.black54),
+          Expanded(
+            flex: 4,
+            child: Text(
+              label,
+              style: const TextStyle(fontSize: 13, color: Colors.black54),
+            ),
           ),
-          Text(
-            "\$${price.toStringAsFixed(2)}",
-            style: TextStyle(
-              fontSize: size,
-              fontWeight: FontWeight.bold,
-              color: color,
+          Expanded(
+            flex: 3,
+            child: Text(
+              precio,
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 15,
+                color: color,
+              ),
+            ),
+          ),
+          Expanded(
+            flex: 2,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: esCosto
+                    ? Colors.grey[200]
+                    : Colors.blue.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(5),
+              ),
+              child: Text(
+                utilidad,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                  color: esCosto ? Colors.grey : Colors.blue[800],
+                ),
+              ),
             ),
           ),
         ],
       ),
     );
   }
+
+  void _abrirZoom(String url, String clave) {
+    if (url.isEmpty) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => FullScreenImageView(imageUrl: url, clave: clave),
+      ),
+    );
+  }
+
+  void _irAEditar(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => EdicionProductoScreen(
+          clave: widget.item['Clave'].toString().trim(),
+          baseUrl: widget.baseUrl,
+          userRole: "admin",
+          sucursalNames: widget.sucursalNames,
+        ),
+      ),
+    );
+  }
 }
 
-// --- NUEVO WIDGET PARA PANTALLA COMPLETA ---
 class FullScreenImageView extends StatelessWidget {
   final String imageUrl;
-  final String? clave;
-
-  const FullScreenImageView({super.key, required this.imageUrl, this.clave});
+  final String clave;
+  const FullScreenImageView({
+    super.key,
+    required this.imageUrl,
+    required this.clave,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      extendBodyBehindAppBar: true,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.close, color: Colors.white, size: 30),
-          onPressed: () => Navigator.pop(context),
-        ),
+        foregroundColor: Colors.white,
       ),
-      body: SizedBox.expand(
-        // <-- HACE QUE EL ÁREA DE INTERACCIÓN OCUPE TODA LA PANTALLA
+      body: Center(
         child: InteractiveViewer(
-          panEnabled: true,
-          minScale: 1.0,
-          maxScale: 5.0,
-          boundaryMargin: const EdgeInsets.all(0), // Permite libertad total
+          minScale: 1,
+          maxScale: 5,
           child: Hero(
-            tag: 'product_image_${clave ?? 'zoom'}',
-            child: Image.network(
-              imageUrl,
-              fit: BoxFit
-                  .contain, // Mantiene la proporción pero dentro del área expandida
-              alignment: Alignment.center,
-            ),
+            tag: 'product_image_$clave',
+            child: Image.network(imageUrl),
           ),
         ),
       ),
