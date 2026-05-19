@@ -463,9 +463,26 @@ class _DetalleLoteScreenState extends State<DetalleLoteScreen> {
   // Ficha de producto idéntica a la del inventario
   Widget _buildProductoCard(dynamic item) {
     bool activo = item['Activo'] == 1 || item['Activo'] == true;
-    String fotoUrl = item['Foto'] != null && item['Foto'].toString().isNotEmpty
-        ? '${widget.baseUrl}/uploads/${item['Foto']}'
-        : '';
+    String fotoUrl = '';
+
+    // 1. Prioridad: Google Drive
+    // Accedemos DIRECTAMENTE al mapa con corchetes y comillas.
+    // Esto es vital: NO uses 'item.drive_id' ni 'driveId' como propiedad.
+    final driveId = item['drive_id'];
+
+    if (driveId != null &&
+        driveId.toString().isNotEmpty &&
+        driveId.toString() != 'null') {
+      // AQUÍ ESTÁ LA URL REAL:
+      // Esta es la forma estándar de mostrar imágenes públicas de Drive
+      fotoUrl = "https://drive.google.com/uc?id=$driveId";
+    }
+    // 2. Respaldo: Local
+    else if (item['Foto'] != null &&
+        item['Foto'].toString().isNotEmpty &&
+        item['Foto'].toString() != 'null') {
+      fotoUrl = '${widget.baseUrl}/uploads/${item['Foto']}';
+    }
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -484,13 +501,12 @@ class _DetalleLoteScreenState extends State<DetalleLoteScreen> {
                 sucursalNames: nombresSucursales,
               ),
             ),
-          ).then((_) => _cargarProductos()); // Recargar por si se editó
+          ).then((_) => _cargarProductos());
         },
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Row(
             children: [
-              // Imagen
               Container(
                 width: 70,
                 height: 70,
@@ -517,7 +533,6 @@ class _DetalleLoteScreenState extends State<DetalleLoteScreen> {
                       ),
               ),
               const SizedBox(width: 15),
-              // Datos
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,

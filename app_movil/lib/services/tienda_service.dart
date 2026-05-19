@@ -33,7 +33,7 @@ class TiendaService {
   // 3. Obtener Sucursales (Almacenes)
   static Future<List<dynamic>> fetchSucursales(String baseUrl) async {
     try {
-      final url = Uri.parse('$baseUrl/api/sucursales?soloApp=true');
+      final url = Uri.parse('$baseUrl/api/sucursales');
       debugPrint("--- Intentando conectar a: $url ---");
 
       final res = await http.get(url).timeout(const Duration(seconds: 5));
