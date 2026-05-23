@@ -5,11 +5,12 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../core/constants.dart';
-import 'edicion_producto_screen.dart'; // Asegúrate de tener esta importación correcta
+import 'edicion_producto_screen.dart';
+import 'detalle_producto_screen.dart';
 
 class LanzamientosScreen extends StatefulWidget {
   final String baseUrl;
-  final String userRole; // Necesario para pasarlo a la edición
+  final String userRole;
 
   const LanzamientosScreen({
     super.key,
@@ -22,13 +23,90 @@ class LanzamientosScreen extends StatefulWidget {
 }
 
 class _LanzamientosScreenState extends State<LanzamientosScreen> {
-  bool isLoading = true;
+  bool isLoading = false;
   List<dynamic> lotes = [];
 
   @override
   void initState() {
     super.initState();
     _cargarLotes();
+  }
+
+  // --- NUEVA FUNCIÓN: SINCRONIZAR FOTOS DRIVE ---
+  Future<void> _sincronizarFotosManual() async {
+    bool confirmar =
+        await showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text("🔄 Sincronizar Google Drive"),
+            content: const Text(
+              "¿Deseas ejecutar la búsqueda de nuevas fotos en Drive ahora mismo? \n\nEsto actualizará los productos modificados hoy.",
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text("Ahora no"),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text("Ejecutar"),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (!confirmar) return;
+
+    setState(() => isLoading = true);
+    try {
+      final res = await http.post(
+        Uri.parse('${widget.baseUrl}/api/admin/sincronizar-fotos'),
+      );
+      final data = json.decode(res.body);
+
+      if (res.statusCode == 200 && data['success']) {
+        _mostrarResumenSync(data['output']);
+      } else {
+        throw Exception(data['error'] ?? "Error desconocido");
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("❌ Error de servidor: $e")));
+    } finally {
+      setState(() => isLoading = false);
+    }
+  }
+
+  void _mostrarResumenSync(String output) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("✅ Sincronización Exitosa"),
+        content: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.black87,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            output,
+            style: const TextStyle(
+              color: Colors.greenAccent,
+              fontSize: 12,
+              fontFamily: 'monospace',
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cerrar"),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _cargarLotes() async {
@@ -63,56 +141,34 @@ class _LanzamientosScreenState extends State<LanzamientosScreen> {
 
       final data = json.decode(res.body);
       if (res.statusCode == 200 && data['success']) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text("✅ ${data['actualizados']} productos actualizados"),
-            ),
-          );
-        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("🚀 Lote procesado con éxito")),
+        );
         _cargarLotes();
-      } else {
-        throw Exception(data['error']);
       }
     } catch (e) {
-      if (mounted)
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text("❌ Error: $e")));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("❌ Error: $e")));
       setState(() => isLoading = false);
     }
   }
 
   Future<bool> _mostrarDialogoConfirmacion(String fecha, String accion) async {
-    String titulo = accion == 'publicar'
-        ? '🚀 Publicar Lote'
-        : '⏪ Revertir Publicación';
-    String mensaje = accion == 'publicar'
-        ? '¿Estás seguro de hacer VISIBLES en la tienda todos los productos programados para el $fecha?'
-        : '¿Estás seguro de OCULTAR de la tienda los productos del lote $fecha?';
-
     return await showDialog(
           context: context,
           builder: (context) => AlertDialog(
-            title: Text(titulo, style: const TextStyle(color: azulPrimario)),
-            content: Text(mensaje),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(15),
+            title: Text(
+              accion == 'publicar' ? '🚀 Publicar Lote' : '⏪ Revertir',
             ),
+            content: Text("¿Confirmas la acción para el lote del $fecha?"),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(context, false),
-                child: const Text(
-                  "Cancelar",
-                  style: TextStyle(color: Colors.grey),
-                ),
+                child: const Text("Cancelar"),
               ),
               ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: accion == 'publicar'
-                      ? verdeExito
-                      : Colors.orange,
-                ),
+                style: ElevatedButton.styleFrom(backgroundColor: azulPrimario),
                 onPressed: () => Navigator.pop(context, true),
                 child: const Text("Confirmar"),
               ),
@@ -128,59 +184,57 @@ class _LanzamientosScreenState extends State<LanzamientosScreen> {
       backgroundColor: fondoGris,
       appBar: AppBar(
         title: const Text(
-          "Lanzamientos Programados",
-          style: TextStyle(fontWeight: FontWeight.w300),
+          "Lanzamientos HIATECH",
+          style: TextStyle(fontWeight: FontWeight.bold),
         ),
         backgroundColor: azulPrimario,
-        elevation: 0,
         actions: [
+          IconButton(
+            icon: const Icon(
+              Icons.cloud_sync_rounded,
+              color: Colors.white,
+              size: 28,
+            ),
+            tooltip: "Sincronizar Drive",
+            onPressed: isLoading ? null : _sincronizarFotosManual,
+          ),
           IconButton(icon: const Icon(Icons.refresh), onPressed: _cargarLotes),
         ],
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator(color: azulPrimario))
           : lotes.isEmpty
-          ? const Center(
-              child: Text(
-                "No hay lotes programados",
-                style: TextStyle(color: Colors.grey),
-              ),
-            )
+          ? const Center(child: Text("No hay lotes programados"))
           : ListView.builder(
               padding: const EdgeInsets.all(15),
               itemCount: lotes.length,
               itemBuilder: (context, index) {
                 final lote = lotes[index];
                 final String fecha = lote['FechaLote'];
-                final int total =
-                    int.tryParse(lote['TotalProductos'].toString()) ?? 0;
-                final int pendientes =
-                    int.tryParse(lote['TotalPendientes'].toString()) ?? 0;
-                final bool yaPublicado = pendientes == 0;
+                final bool yaPublicado =
+                    (int.tryParse(lote['TotalPendientes'].toString()) ?? 0) ==
+                    0;
+                final String totalProd =
+                    (lote['total_productos'] ??
+                            lote['TotalProductos'] ??
+                            lote['Total'] ??
+                            '0')
+                        .toString();
 
                 return Card(
-                  margin: const EdgeInsets.only(bottom: 15),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(15),
                   ),
-                  elevation: 3,
                   child: Padding(
                     padding: const EdgeInsets.all(15),
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Row(
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Icon(
-                                  Icons.calendar_month_rounded,
-                                  color: yaPublicado
-                                      ? verdeExito
-                                      : Colors.orange,
-                                ),
-                                const SizedBox(width: 8),
                                 Text(
                                   fecha,
                                   style: const TextStyle(
@@ -189,103 +243,82 @@ class _LanzamientosScreenState extends State<LanzamientosScreen> {
                                     color: azulPrimario,
                                   ),
                                 ),
+                                const SizedBox(height: 4),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: azulAcento.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    "$totalProd productos",
+                                    style: const TextStyle(
+                                      color: azulAcento,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
                               ],
                             ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 5,
+                            Badge(
+                              label: Text(
+                                yaPublicado ? "PUBLICADO" : "PROGRAMADO",
                               ),
-                              decoration: BoxDecoration(
-                                color: yaPublicado
-                                    ? verdeExito.withOpacity(0.1)
-                                    : Colors.orange.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Text(
-                                yaPublicado ? "PUBLICADO" : "PENDIENTE",
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                  color: yaPublicado
-                                      ? verdeExito
-                                      : Colors.orange,
-                                ),
-                              ),
+                              backgroundColor: yaPublicado
+                                  ? azulPrimario
+                                  : Colors.orange,
                             ),
                           ],
                         ),
-                        const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 10),
-                          child: Divider(height: 1),
-                        ),
-                        Text(
-                          "Productos en este lote: $total",
-                          style: const TextStyle(
-                            fontSize: 14,
-                            color: Colors.black87,
-                          ),
-                        ),
-                        const SizedBox(height: 15),
+                        const Divider(height: 25),
                         Row(
-                          mainAxisAlignment: MainAxisAlignment
-                              .spaceBetween, // Separamos el botón de Ver de los de acción
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            // BOTÓN PARA VER EL DETALLE
                             TextButton.icon(
-                              onPressed: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => DetalleLoteScreen(
-                                      fecha: fecha,
-                                      baseUrl: widget.baseUrl,
-                                      userRole: widget.userRole,
-                                      yaPublicado: yaPublicado,
-                                    ),
+                              onPressed: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => DetalleLoteScreen(
+                                    fecha: fecha,
+                                    baseUrl: widget.baseUrl,
+                                    userRole: widget.userRole,
+                                    yaPublicado: yaPublicado,
                                   ),
-                                ).then(
-                                  (_) => _cargarLotes(),
-                                ); // Recargar al volver por si editó algo
-                              },
+                                ),
+                              ).then((_) => _cargarLotes()),
                               icon: const Icon(
-                                Icons.list_alt,
+                                Icons.inventory_2,
                                 color: azulAcento,
                               ),
                               label: const Text(
-                                "Ver Productos",
+                                "Gestionar Lote",
                                 style: TextStyle(
                                   color: azulAcento,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
                             ),
-                            Row(
-                              children: [
-                                if (yaPublicado)
-                                  OutlinedButton.icon(
-                                    style: OutlinedButton.styleFrom(
-                                      foregroundColor: Colors.orange,
-                                    ),
-                                    icon: const Icon(Icons.undo, size: 18),
-                                    label: const Text("Revertir"),
-                                    onPressed: () =>
-                                        _procesarLote(fecha, 'revertir'),
-                                  ),
-                                if (!yaPublicado)
-                                  ElevatedButton.icon(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: verdeExito,
-                                    ),
-                                    icon: const Icon(
-                                      Icons.rocket_launch,
-                                      size: 18,
-                                    ),
-                                    label: const Text("Publicar"),
-                                    onPressed: () =>
-                                        _procesarLote(fecha, 'publicar'),
-                                  ),
-                              ],
+                            ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: yaPublicado
+                                    ? Colors.blueGrey
+                                    : azulPrimario,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 20,
+                                ),
+                              ),
+                              onPressed: () => _procesarLote(
+                                fecha,
+                                yaPublicado ? 'revertir' : 'publicar',
+                              ),
+                              child: Text(
+                                yaPublicado ? "REVERTIR" : "PUBLICAR",
+                              ),
                             ),
                           ],
                         ),
@@ -299,9 +332,7 @@ class _LanzamientosScreenState extends State<LanzamientosScreen> {
   }
 }
 
-// =========================================================================
-// SUB-PANTALLA: DETALLE DEL LOTE (Listado de productos y exportación a PDF)
-// =========================================================================
+// --- SUB-PANTALLA: DETALLE DEL LOTE ACTUALIZADA ---
 class DetalleLoteScreen extends StatefulWidget {
   final String fecha;
   final String baseUrl;
@@ -324,15 +355,6 @@ class _DetalleLoteScreenState extends State<DetalleLoteScreen> {
   bool isLoading = true;
   List<dynamic> productos = [];
 
-  // Nombres de tus sucursales para el módulo de edición
-  final List<String> nombresSucursales = const [
-    'Tuxtla Gutiérrez',
-    'Comitán',
-    'San Cristóbal',
-    'Alm 4',
-    'Alm 5',
-  ];
-
   @override
   void initState() {
     super.initState();
@@ -352,83 +374,8 @@ class _DetalleLoteScreenState extends State<DetalleLoteScreen> {
         });
       }
     } catch (e) {
-      debugPrint("Error: $e");
       setState(() => isLoading = false);
     }
-  }
-
-  Future<void> _generarYCompartirPDF() async {
-    final doc = pw.Document();
-
-    doc.addPage(
-      pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.all(30),
-        build: (pw.Context context) {
-          return [
-            pw.Header(
-              level: 0,
-              child: pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text(
-                    'Lanzamientos Factory',
-                    style: pw.TextStyle(
-                      fontSize: 24,
-                      fontWeight: pw.FontWeight.bold,
-                      color: PdfColors.blue900,
-                    ),
-                  ),
-                  pw.Text(
-                    'Lote: ${widget.fecha}',
-                    style: pw.TextStyle(fontSize: 16, color: PdfColors.grey700),
-                  ),
-                ],
-              ),
-            ),
-            pw.SizedBox(height: 10),
-            pw.Text(
-              widget.yaPublicado
-                  ? 'Estado: PUBLICADO EN TIENDA'
-                  : 'Estado: PENDIENTE DE PUBLICACIÓN',
-              style: pw.TextStyle(
-                color: widget.yaPublicado
-                    ? PdfColors.green700
-                    : PdfColors.orange700,
-                fontWeight: pw.FontWeight.bold,
-              ),
-            ),
-            pw.SizedBox(height: 20),
-            pw.Table.fromTextArray(
-              headers: ['Clave', 'Prov.', 'Descripción', 'Precio'],
-              headerStyle: pw.TextStyle(
-                fontWeight: pw.FontWeight.bold,
-                color: PdfColors.white,
-              ),
-              headerDecoration: const pw.BoxDecoration(
-                color: PdfColors.blue800,
-              ),
-              cellAlignment: pw.Alignment.centerLeft,
-              data: productos
-                  .map(
-                    (p) => [
-                      p['Clave'].toString(),
-                      p['ClavePro']?.toString() ?? '',
-                      p['Descripcion'].toString(),
-                      '\$${p['Precio1']}',
-                    ],
-                  )
-                  .toList(),
-            ),
-          ];
-        },
-      ),
-    );
-
-    await Printing.sharePdf(
-      bytes: await doc.save(),
-      filename: 'Lanzamiento_${widget.fecha}.pdf',
-    );
   }
 
   @override
@@ -436,149 +383,106 @@ class _DetalleLoteScreenState extends State<DetalleLoteScreen> {
     return Scaffold(
       backgroundColor: fondoGris,
       appBar: AppBar(
-        title: Text(
-          "Productos del Lote: ${widget.fecha}",
-          style: const TextStyle(fontSize: 16),
-        ),
+        title: Text("Lote ${widget.fecha}"),
         backgroundColor: azulPrimario,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.picture_as_pdf),
-            tooltip: "Exportar a PDF",
-            onPressed: productos.isEmpty ? null : _generarYCompartirPDF,
-          ),
-        ],
       ),
       body: isLoading
-          ? const Center(child: CircularProgressIndicator(color: azulPrimario))
+          ? const Center(child: CircularProgressIndicator())
           : ListView.builder(
+              key: const PageStorageKey('scroll_productos_lote'),
               padding: const EdgeInsets.all(12),
               itemCount: productos.length,
               itemBuilder: (context, index) =>
-                  _buildProductoCard(productos[index]),
+                  _buildProductoCard(productos[index], index),
             ),
     );
   }
 
-  // Ficha de producto idéntica a la del inventario
-  Widget _buildProductoCard(dynamic item) {
-    bool activo = item['Activo'] == 1 || item['Activo'] == true;
-    String fotoUrl = '';
+  Widget _buildProductoCard(dynamic item, int index) {
+    String driveId = item['drive_id']?.toString() ?? '';
+    String fotoUrl = driveId.isNotEmpty && driveId != 'null'
+        ? "https://drive.google.com/uc?id=$driveId"
+        : '${widget.baseUrl}/uploads/${item['Foto']}';
 
-    // 1. Prioridad: Google Drive
-    // Accedemos DIRECTAMENTE al mapa con corchetes y comillas.
-    // Esto es vital: NO uses 'item.drive_id' ni 'driveId' como propiedad.
-    final driveId = item['drive_id'];
-
-    if (driveId != null &&
-        driveId.toString().isNotEmpty &&
-        driveId.toString() != 'null') {
-      // AQUÍ ESTÁ LA URL REAL:
-      // Esta es la forma estándar de mostrar imágenes públicas de Drive
-      fotoUrl = "https://drive.google.com/uc?id=$driveId";
-    }
-    // 2. Respaldo: Local
-    else if (item['Foto'] != null &&
-        item['Foto'].toString().isNotEmpty &&
-        item['Foto'].toString() != 'null') {
-      fotoUrl = '${widget.baseUrl}/uploads/${item['Foto']}';
-    }
+    bool isActivo = item['Activo']?.toString() != '0';
 
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-      elevation: 2,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(15),
-        onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => EdicionProductoScreen(
-                clave: item['Clave'],
-                baseUrl: widget.baseUrl,
-                userRole: widget.userRole,
-                sucursalNames: nombresSucursales,
+      clipBehavior: Clip.antiAlias,
+      margin: const EdgeInsets.only(bottom: 10),
+      color: isActivo ? Colors.white : const Color(0xFFFFF0F0),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: isActivo
+            ? BorderSide.none
+            : BorderSide(color: Colors.red.shade300, width: 1.5),
+      ),
+      child: Stack(
+        children: [
+          ListTile(
+            leading: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.network(
+                fotoUrl,
+                width: 50,
+                height: 50,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => const Icon(Icons.image),
               ),
             ),
-          ).then((_) => _cargarProductos());
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              Container(
-                width: 70,
-                height: 70,
-                decoration: BoxDecoration(
-                  color: Colors.grey[200],
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.grey[300]!),
-                ),
-                child: fotoUrl.isNotEmpty
-                    ? ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: Image.network(
-                          fotoUrl,
-                          fit: BoxFit.cover,
-                          errorBuilder: (c, e, s) => const Icon(
-                            Icons.image_not_supported,
-                            color: Colors.grey,
-                          ),
-                        ),
-                      )
-                    : const Icon(
-                        Icons.inventory_2_outlined,
-                        color: Colors.grey,
-                      ),
+            title: Text(
+              item['Descripcion'],
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+                color: isActivo ? Colors.black : Colors.blueGrey,
               ),
-              const SizedBox(width: 15),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      item['Descripcion'] ?? 'Sin descripción',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                        decoration: activo ? null : TextDecoration.lineThrough,
-                        color: activo ? Colors.black87 : Colors.grey,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 5),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Text(
-                            "${item['Clave']}  |  Prov: ${item['ClavePro'] ?? 'N/A'}",
-                            style: const TextStyle(
-                              color: azulAcento,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        Text(
-                          formatCurrency(item['Precio1'] ?? 0),
-                          style: const TextStyle(
-                            color: verdeExito,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+              maxLines:
+                  2, // Le puse 2 líneas para que aproveche aún más el espacio
+              overflow: TextOverflow.ellipsis,
+            ),
+            subtitle: Text(
+              "${item['Clave']} | \$${(double.tryParse(item['Precio1']?.toString() ?? '0') ?? 0).toStringAsFixed(2)}",
+              style: TextStyle(
+                color: isActivo ? azulAcento : Colors.red,
+                fontWeight: FontWeight.w600,
               ),
-            ],
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => DetalleProductoScreen(
+                    item: item,
+                    baseUrl: widget.baseUrl,
+                  ),
+                ),
+              ).then((_) => _cargarProductos());
+            },
           ),
-        ),
+
+          Positioned(
+            top: 0,
+            left: 0,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: isActivo ? azulAcento : Colors.grey[600],
+                borderRadius: const BorderRadius.only(
+                  bottomRight: Radius.circular(10),
+                ),
+              ),
+              child: Text(
+                "#${index + 1}",
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

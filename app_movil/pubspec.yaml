@@ -44,7 +44,7 @@ flutter_launcher_icons:
 
 # CONFIGURACIÓN DE SPLASH (Fondo Rojo)
 flutter_native_splash:
-  color: "#ED3237"
+  color: "#000000"
   image: "assets/images/logo_factory.png" # Corregido: añadida la carpeta /icon/
   android_12:
     image: "assets/images/logo_factory.png"

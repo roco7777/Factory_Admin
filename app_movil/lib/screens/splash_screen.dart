@@ -112,7 +112,7 @@ class _SplashScreenState extends State<SplashScreen> {
     const Color rojoExactoFactory = Color(0xFFED3237);
 
     return Scaffold(
-      backgroundColor: rojoExactoFactory, // Ahora sí, el color idéntico
+      backgroundColor: Colors.black, // Ahora sí, el color idéntico
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -121,7 +121,7 @@ class _SplashScreenState extends State<SplashScreen> {
             Image.asset(
               'assets/images/logo_factory.png',
               // Usamos el 75% del ancho de la pantalla para que se vea genial
-              width: MediaQuery.of(context).size.width * 0.75,
+              width: MediaQuery.of(context).size.width * 1,
               fit: BoxFit.contain,
             ),
 
