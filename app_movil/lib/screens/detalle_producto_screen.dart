@@ -2,11 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:io';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:screenshot/screenshot.dart';
-import 'package:share_plus/share_plus.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart' as path;
-
+import 'ficha_producto_helper.dart';
 import '../services/tienda_service.dart';
 import 'edicion_producto_screen.dart';
 
@@ -25,8 +21,6 @@ class DetalleProductoScreen extends StatefulWidget {
 }
 
 class _DetalleProductoScreenState extends State<DetalleProductoScreen> {
-  final ScreenshotController screenshotController = ScreenshotController();
-
   List<String> nombresSucursales = [];
   bool isLoadingSucursales = true;
 
@@ -91,14 +85,8 @@ class _DetalleProductoScreenState extends State<DetalleProductoScreen> {
   }
 
   Future<void> _exportarFicha() async {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(child: CircularProgressIndicator()),
-    );
-
     final data = fullItem ?? widget.item;
-    String descripcion = data['Descripcion']?.toString().toUpperCase() ?? '';
+    String descripcion = data['Descripcion']?.toString() ?? '';
     String clave = data['Clave']?.toString() ?? '';
 
     final String imageUrl = TiendaService.getImagenUrl(
@@ -107,89 +95,32 @@ class _DetalleProductoScreenState extends State<DetalleProductoScreen> {
       widget.baseUrl,
     );
 
-    Widget fichaVisual = Container(
-      width: 450,
-      color: Colors.white,
-      padding: const EdgeInsets.all(25),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (imageUrl.isNotEmpty)
-            Image.network(imageUrl, height: 300, fit: BoxFit.contain)
-          else
-            const Icon(
-              Icons.image_not_supported,
-              size: 150,
-              color: Colors.grey,
-            ),
-          const SizedBox(height: 20),
-          Text(
-            descripcion,
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF1A237E),
-            ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 10),
-          Text(
-            "CLAVE: $clave",
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Colors.black54,
-            ),
-          ),
-          const Divider(height: 30, thickness: 2),
-          _filaPrecioFicha("Precio Público:", data['Precio1']),
-          _filaPrecioFicha("Precio Mayoreo:", data['Precio2']),
-          _filaPrecioFicha("Precio Especial:", data['Precio3']),
-        ],
-      ),
-    );
+    // Mapeamos los precios de la base de datos al formato que espera el Helper
+    List<Map<String, dynamic>> listaPrecios = [
+      {
+        'Etiqueta': 'Precio Público',
+        'Minimo': data['Min1'] ?? 1,
+        'Precio': data['Precio1'],
+      },
+      {
+        'Etiqueta': 'Precio Mayoreo',
+        'Minimo': data['Min2'] ?? 1,
+        'Precio': data['Precio2'],
+      },
+      {
+        'Etiqueta': 'Precio Especial',
+        'Minimo': data['Min3'] ?? 1,
+        'Precio': data['Precio3'],
+      },
+    ];
 
-    try {
-      final uint8list = await screenshotController.captureFromWidget(
-        Material(child: fichaVisual),
-        delay: const Duration(milliseconds: 250),
-      );
-
-      final directory = await getTemporaryDirectory();
-      final imagePath = await File(
-        path.join(directory.path, '${clave}_ficha.png'),
-      ).create();
-      await imagePath.writeAsBytes(uint8list);
-
-      if (!mounted) return;
-      Navigator.pop(context);
-
-      await Share.shareXFiles([
-        XFile(imagePath.path),
-      ], text: 'Cotización Factory: $descripcion');
-    } catch (e) {
-      if (mounted) Navigator.pop(context);
-      debugPrint("Error exportando: $e");
-    }
-  }
-
-  Widget _filaPrecioFicha(String label, dynamic valor) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: const TextStyle(fontSize: 16)),
-          Text(
-            "\$${formatPrecio(valor)}",
-            style: const TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              color: Color(0xFF1A237E),
-            ),
-          ),
-        ],
-      ),
+    // Delegamos la carga, el renderizado y el diseño al helper centralizado
+    await FichaProductoHelper.compartirFicha(
+      context: context,
+      clave: clave,
+      descripcion: descripcion,
+      imagenUrl: imageUrl,
+      precios: listaPrecios,
     );
   }
 

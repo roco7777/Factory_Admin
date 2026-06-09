@@ -4,9 +4,12 @@ import 'dart:convert';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:share_plus/share_plus.dart'; // Añadido para exportar
 import '../core/constants.dart';
 import 'edicion_producto_screen.dart';
 import 'detalle_producto_screen.dart';
+import '../services/tienda_service.dart'; // Añadido para procesar URLs de fotos
+import 'ficha_producto_helper.dart'; // Añadido para crear el catálogo visual
 
 class LanzamientosScreen extends StatefulWidget {
   final String baseUrl;
@@ -32,7 +35,70 @@ class _LanzamientosScreenState extends State<LanzamientosScreen> {
     _cargarLotes();
   }
 
-  // --- NUEVA FUNCIÓN: SINCRONIZAR FOTOS DRIVE ---
+  // --- NUEVA FUNCIÓN: LIMPIAR CACHÉ DEL SERVIDOR ---
+  Future<void> _limpiarCacheServidor() async {
+    bool confirmar =
+        await showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text("🧹 Limpiar Caché de Fotos"),
+            content: const Text(
+              "¿Deseas vaciar la memoria RAM del servidor?\n\nEsto obligará a la tienda a descargar las fotos frescas de Google Drive en la próxima consulta.",
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text("Cancelar"),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text(
+                  "Limpiar Ahora",
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (!confirmar) return;
+
+    setState(() => isLoading = true);
+    try {
+      final res = await http.get(
+        Uri.parse('${widget.baseUrl}/api/admin/limpiar-cache'),
+      );
+
+      if (res.statusCode == 200) {
+        final data = json.decode(res.body);
+        if (data['success'] == true && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("✅ Caché de fotos limpiado con éxito"),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } else {
+        throw Exception("Error en la respuesta del servidor");
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("❌ Error al limpiar caché: $e"),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => isLoading = false);
+    }
+  }
+
+  // --- FUNCIÓN: SINCRONIZAR FOTOS DRIVE ---
   Future<void> _sincronizarFotosManual() async {
     bool confirmar =
         await showDialog(
@@ -170,7 +236,10 @@ class _LanzamientosScreenState extends State<LanzamientosScreen> {
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: azulPrimario),
                 onPressed: () => Navigator.pop(context, true),
-                child: const Text("Confirmar"),
+                child: const Text(
+                  "Confirmar",
+                  style: TextStyle(color: Colors.white),
+                ),
               ),
             ],
           ),
@@ -185,20 +254,42 @@ class _LanzamientosScreenState extends State<LanzamientosScreen> {
       appBar: AppBar(
         title: const Text(
           "Lanzamientos HIATECH",
-          style: TextStyle(fontWeight: FontWeight.bold),
+          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
         ),
         backgroundColor: azulPrimario,
+        iconTheme: const IconThemeData(color: Colors.white),
         actions: [
           IconButton(
-            icon: const Icon(
-              Icons.cloud_sync_rounded,
-              color: Colors.white,
-              size: 28,
-            ),
-            tooltip: "Sincronizar Drive",
-            onPressed: isLoading ? null : _sincronizarFotosManual,
+            icon: const Icon(Icons.refresh),
+            onPressed: isLoading ? null : _cargarLotes,
           ),
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _cargarLotes),
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              if (value == 'sync') {
+                _sincronizarFotosManual();
+              } else if (value == 'cache') {
+                _limpiarCacheServidor();
+              }
+            },
+            itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+              const PopupMenuItem<String>(
+                value: 'sync',
+                child: ListTile(
+                  leading: Icon(Icons.cloud_sync_rounded, color: azulPrimario),
+                  title: Text('Sincronizar Drive'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              const PopupMenuItem<String>(
+                value: 'cache',
+                child: ListTile(
+                  leading: Icon(Icons.cleaning_services, color: Colors.orange),
+                  title: Text('Limpiar Caché Fotos'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ],
+          ),
         ],
       ),
       body: isLoading
@@ -378,13 +469,130 @@ class _DetalleLoteScreenState extends State<DetalleLoteScreen> {
     }
   }
 
+  // --- NUEVA FUNCIÓN: Exportación Masiva Mejorada ---
+  Future<void> _exportarLoteWhatsApp() async {
+    if (productos.isEmpty) return;
+
+    // 1. Mostrar diálogo de espera
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        content: Row(
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(width: 20),
+            Expanded(
+              child: Text(
+                "Generando ${productos.length} fotos...\nDescargando precios completos, esto tomará unos segundos.",
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    List<XFile> fichasGeneradas = [];
+
+    // 2. Procesar cada producto del lote
+    for (var item in productos) {
+      String clave = item['Clave']?.toString() ?? '';
+
+      // ¡AQUÍ ESTÁ LA SOLUCIÓN! Consultamos el detalle completo del producto
+      // para asegurarnos de tener Precio2, Precio3, Min2 y Min3 reales.
+      Map<String, dynamic> dataCompleta = item;
+      try {
+        final resProd = await http.get(
+          Uri.parse('${widget.baseUrl}/api/producto/$clave'),
+        );
+        if (resProd.statusCode == 200) {
+          dataCompleta = json.decode(resProd.body);
+        }
+      } catch (e) {
+        debugPrint("Error obteniendo detalle de $clave: $e");
+      }
+
+      String descripcion = dataCompleta['Descripcion']?.toString() ?? '';
+
+      // Usamos el TiendaService con la data completa recién descargada
+      String fotoUrl = TiendaService.getImagenUrl(
+        dataCompleta['drive_id']?.toString(),
+        dataCompleta['Foto']?.toString(),
+        widget.baseUrl,
+      );
+
+      // Extraemos los precios de la data completa
+      List<Map<String, dynamic>> listaPrecios = [
+        {
+          'Etiqueta': 'Precio Público',
+          'Minimo': dataCompleta['Min1'] ?? 1,
+          'Precio': dataCompleta['Precio1'],
+        },
+        {
+          'Etiqueta': 'Precio Mayoreo',
+          'Minimo': dataCompleta['Min2'] ?? 1,
+          'Precio': dataCompleta['Precio2'],
+        },
+        {
+          'Etiqueta': 'Precio Especial',
+          'Minimo': dataCompleta['Min3'] ?? 1,
+          'Precio': dataCompleta['Precio3'],
+        },
+      ];
+
+      XFile? ficha = await FichaProductoHelper.generarFichaXFile(
+        clave: clave,
+        descripcion: descripcion,
+        imagenUrl: fotoUrl,
+        precios: listaPrecios,
+      );
+
+      if (ficha != null) {
+        fichasGeneradas.add(ficha);
+      }
+    }
+
+    // 3. Cerrar el diálogo de carga
+    if (mounted && Navigator.canPop(context)) {
+      Navigator.pop(context);
+    }
+
+    // 4. Compartir todas las imágenes a WhatsApp a la vez
+    if (fichasGeneradas.isNotEmpty) {
+      await Share.shareXFiles(
+        fichasGeneradas,
+        text:
+            '🌟 Lanzamiento Lote ${widget.fecha} 🌟\n¡Nuevos ingresos ya disponibles!',
+      );
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("No se pudieron generar las fotos.")),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: fondoGris,
       appBar: AppBar(
-        title: Text("Lote ${widget.fecha}"),
+        title: Text(
+          "Lote ${widget.fecha}",
+          style: const TextStyle(color: Colors.white),
+        ),
         backgroundColor: azulPrimario,
+        iconTheme: const IconThemeData(color: Colors.white),
+        actions: [
+          // --- NUEVO BOTÓN DE COMPARTIR LOTE ---
+          if (productos.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.share_rounded),
+              tooltip: "Exportar lote a WhatsApp",
+              onPressed: _exportarLoteWhatsApp,
+            ),
+        ],
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -399,10 +607,12 @@ class _DetalleLoteScreenState extends State<DetalleLoteScreen> {
   }
 
   Widget _buildProductoCard(dynamic item, int index) {
-    String driveId = item['drive_id']?.toString() ?? '';
-    String fotoUrl = driveId.isNotEmpty && driveId != 'null'
-        ? "https://drive.google.com/uc?id=$driveId"
-        : '${widget.baseUrl}/uploads/${item['Foto']}';
+    // Usamos la lógica centralizada de tu TiendaService
+    String fotoUrl = TiendaService.getImagenUrl(
+      item['drive_id']?.toString(),
+      item['Foto']?.toString(),
+      widget.baseUrl,
+    );
 
     bool isActivo = item['Activo']?.toString() != '0';
 
@@ -436,8 +646,7 @@ class _DetalleLoteScreenState extends State<DetalleLoteScreen> {
                 fontWeight: FontWeight.bold,
                 color: isActivo ? Colors.black : Colors.blueGrey,
               ),
-              maxLines:
-                  2, // Le puse 2 líneas para que aproveche aún más el espacio
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
             subtitle: Text(
@@ -460,7 +669,6 @@ class _DetalleLoteScreenState extends State<DetalleLoteScreen> {
               ).then((_) => _cargarProductos());
             },
           ),
-
           Positioned(
             top: 0,
             left: 0,

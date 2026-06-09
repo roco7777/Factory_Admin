@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'dart:async'; // Añadido para el manejo de tiempos
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:screenshot/screenshot.dart';
 import 'package:share_plus/share_plus.dart';
@@ -9,21 +9,13 @@ class FichaProductoHelper {
   static final ScreenshotController _screenshotController =
       ScreenshotController();
 
-  static Future<void> compartirFicha({
-    required BuildContext context,
+  static Future<XFile?> generarFichaXFile({
     required String clave,
     required String descripcion,
     required String imagenUrl,
     required List<Map<String, dynamic>> precios,
   }) async {
     try {
-      showDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (context) => const Center(child: CircularProgressIndicator()),
-      );
-
-      // 1. PRE-CARGA DE IMAGEN: Forzamos a Flutter a descargar la imagen antes de seguir
       final ImageProvider imgProvider = NetworkImage(imagenUrl);
       final Completer<void> completer = Completer<void>();
       final ImageStream stream = imgProvider.resolve(
@@ -43,26 +35,20 @@ class FichaProductoHelper {
       );
       stream.addListener(listener);
 
-      // Esperamos a que la imagen cargue o que pasen máximo 5 segundos (timeout)
       await completer.future.timeout(
         const Duration(seconds: 5),
         onTimeout: () {},
       );
 
-      // 2. Filtrar precios mayores a 0
       List<Map<String, dynamic>> preciosValidos = precios.where((p) {
         double val = double.tryParse(p['Precio'].toString()) ?? 0;
         return val > 0;
       }).toList();
 
-      // 3. Captura con un pequeño respiro extra para el renderizado
       final imageBytes = await _screenshotController.captureFromWidget(
-        _disenoFicha(clave, descripcion, imagenUrl, preciosValidos),
+        _disenoFichaOptimizada(clave, descripcion, imagenUrl, preciosValidos),
         delay: const Duration(milliseconds: 300),
-        context: context,
       );
-
-      if (Navigator.canPop(context)) Navigator.pop(context);
 
       final directory = await getTemporaryDirectory();
       final imagePath = await File(
@@ -70,9 +56,43 @@ class FichaProductoHelper {
       ).create();
       await imagePath.writeAsBytes(imageBytes);
 
-      await Share.shareXFiles([
-        XFile(imagePath.path),
-      ], text: 'Producto: $clave');
+      return XFile(imagePath.path);
+    } catch (e) {
+      debugPrint("Error generando XFile para $clave: $e");
+      return null;
+    }
+  }
+
+  static Future<void> compartirFicha({
+    required BuildContext context,
+    required String clave,
+    required String descripcion,
+    required String imagenUrl,
+    required List<Map<String, dynamic>> precios,
+  }) async {
+    try {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(child: CircularProgressIndicator()),
+      );
+
+      XFile? ficha = await generarFichaXFile(
+        clave: clave,
+        descripcion: descripcion,
+        imagenUrl: imagenUrl,
+        precios: precios,
+      );
+
+      if (Navigator.canPop(context)) Navigator.pop(context);
+
+      if (ficha != null) {
+        await Share.shareXFiles([ficha], text: 'Cotización: $clave');
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Error interno al generar imagen")),
+        );
+      }
     } catch (e) {
       if (Navigator.canPop(context)) Navigator.pop(context);
       ScaffoldMessenger.of(
@@ -81,85 +101,144 @@ class FichaProductoHelper {
     }
   }
 
-  static Widget _disenoFicha(
+  static Widget _disenoFichaOptimizada(
     String clave,
     String desc,
     String url,
     List<Map<String, dynamic>> precios,
   ) {
+    List<Widget> listaPreciosWidgets = [];
+
+    for (int i = 0; i < precios.length; i++) {
+      var p = precios[i];
+      double precioVal = double.tryParse(p['Precio'].toString()) ?? 0;
+      String precioFormat = precioVal.toStringAsFixed(2);
+      int minVal = (double.tryParse(p['Minimo'].toString()) ?? 0).toInt();
+      double totalGasto = precioVal * minVal;
+
+      String etiquetaNombre = precios.length == 1
+          ? "Precio"
+          : "Precio ${i + 1}";
+
+      listaPreciosWidgets.add(
+        Padding(
+          padding: const EdgeInsets.symmetric(
+            vertical: 4,
+          ), // Un poco más de espacio vertical ya que hay holgura
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    etiquetaNombre,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      color: Colors.black,
+                      fontWeight: FontWeight.bold,
+                      height: 1.1,
+                    ),
+                  ),
+                  if (precios.length > 1)
+                    Text(
+                      "Mínimo: $minVal pzas",
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: Colors.black87,
+                        fontWeight: FontWeight.w500,
+                        height: 1.1,
+                      ),
+                    ),
+                ],
+              ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    "\$$precioFormat",
+                    style: const TextStyle(
+                      color: Color(0xFFD32F2F),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 30,
+                      height: 1.0,
+                    ),
+                  ),
+                  if (precios.length > 1) ...[
+                    const SizedBox(width: 8),
+                    Text(
+                      "(\$${totalGasto.toStringAsFixed(0)})",
+                      style: const TextStyle(
+                        color: Colors.black,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                        height: 1.0,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Container(
       width: 450,
-      padding: const EdgeInsets.only(bottom: 10),
       color: Colors.white,
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Image.network(url, height: 400, width: 450, fit: BoxFit.contain),
-          Container(height: 4, color: const Color(0xFFD32F2F)),
+          // 1. IMAGEN PRINCIPAL
+          Container(
+            color: Colors.white,
+            height: 480,
+            child: Image.network(url, fit: BoxFit.contain),
+          ),
+
+          // 2. BLOQUE DE IDENTIFICACIÓN (Clave arriba, Descripción abajo)
           Padding(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.only(left: 15, right: 15, bottom: 12),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  clave,
+                  clave.toUpperCase(),
+                  textAlign: TextAlign.center,
                   style: const TextStyle(
                     color: Color(0xFFD32F2F),
-                    fontWeight: FontWeight.bold,
-                    fontSize: 28,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 26, // Tamaño ideal y llamativo en su propia fila
+                    height: 1.1,
                   ),
                 ),
+                const SizedBox(height: 4),
                 Text(
                   desc.toUpperCase(),
+                  textAlign: TextAlign.center,
                   style: const TextStyle(
-                    fontSize: 16,
+                    fontSize: 19,
                     color: Colors.black87,
-                    fontWeight: FontWeight.w500,
+                    fontWeight: FontWeight.w800,
+                    height: 1.1,
                   ),
                 ),
-                const SizedBox(height: 15),
-                const Divider(),
-                ...precios
-                    .map(
-                      (p) => Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  p['Etiqueta'],
-                                  style: const TextStyle(
-                                    fontSize: 14,
-                                    color: Colors.grey,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                Text(
-                                  "Mínimo: ${p['Minimo']} pzas",
-                                  style: const TextStyle(
-                                    fontSize: 13,
-                                    color: Colors.black54,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            Text(
-                              "\$${p['Precio']}",
-                              style: const TextStyle(
-                                color: Color(0xFFD32F2F),
-                                fontWeight: FontWeight.bold,
-                                fontSize: 30,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    )
-                    .toList(),
               ],
+            ),
+          ),
+
+          // 3. LÍNEA ROJA DIVISORIA
+          Container(height: 4, color: const Color(0xFFD32F2F)),
+
+          // 4. FOOTER DE PRECIOS (Aprovechando el 100% del ancho de la tarjeta)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: listaPreciosWidgets,
             ),
           ),
         ],

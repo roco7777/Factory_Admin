@@ -127,10 +127,15 @@ class _PantallaInventarioState extends State<PantallaInventario> {
     String descripcion =
         item['Descripcion']?.toString().toUpperCase() ?? 'SIN DESCRIPCIÓN';
     String clave = item['Clave']?.toString() ?? '';
-    String fotoUrl =
-        (item['Foto'] != null && item['Foto'].toString().isNotEmpty)
-        ? '${widget.baseUrl}/uploads/${item['Foto']}'
-        : '';
+
+    // --- CORRECCIÓN: UTILIZAR EL SERVICIO CENTRALIZADO DE IMÁGENES ---
+    String driveId = item['drive_id']?.toString() ?? '';
+    String fotoLocal = item['Foto']?.toString() ?? '';
+    String fotoUrl = TiendaService.getImagenUrl(
+      driveId,
+      fotoLocal,
+      widget.baseUrl,
+    );
 
     Widget fichaVisual = Container(
       width: 500,
@@ -145,7 +150,15 @@ class _PantallaInventarioState extends State<PantallaInventario> {
             width: double.infinity,
             alignment: Alignment.center,
             child: fotoUrl.isNotEmpty
-                ? Image.network(fotoUrl, fit: BoxFit.contain)
+                ? Image.network(
+                    fotoUrl,
+                    fit: BoxFit.contain,
+                    errorBuilder: (context, error, stackTrace) => const Icon(
+                      Icons.inventory_2_outlined,
+                      size: 120,
+                      color: Colors.grey,
+                    ),
+                  )
                 : const Icon(
                     Icons.inventory_2_outlined,
                     size: 120,

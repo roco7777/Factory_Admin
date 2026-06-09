@@ -112,7 +112,7 @@ class _SplashScreenState extends State<SplashScreen> {
     const Color rojoExactoFactory = Color(0xFFED3237);
 
     return Scaffold(
-      backgroundColor: Colors.black, // Ahora sí, el color idéntico
+      backgroundColor: Colors.black, 
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,

@@ -189,15 +189,25 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
       var response = await request.send();
       var responseData = await response.stream.bytesToString();
       var result = json.decode(responseData);
+
       if (response.statusCode == 200 && result['success']) {
         setState(() {
-          fotoActual = result['foto'];
-          driveId = null; // Al subir una nueva local, priorizamos esa
+          // Si el servidor te devuelve la foto ya con el driveId, lo guardamos.
+          // Si no, lo volvemos null para que la app cargue la local mientras se sincroniza.
+          driveId = result['drive_id'];
+
+          // Forzamos a que el nombre local sea CLAVE.jpg como lo estructuramos
+          fotoActual = result['foto'] ?? '${widget.clave}.jpg';
         });
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text("✅ Foto actualizada")));
       }
+    } catch (e) {
+      debugPrint("Error subiendo foto: $e");
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("❌ Error al subir imagen")));
     } finally {
       setState(() => isSaving = false);
     }
@@ -407,10 +417,9 @@ class _EdicionProductoScreenState extends State<EdicionProductoScreen> {
                                     ? ClipRRect(
                                         borderRadius: BorderRadius.circular(23),
                                         child: Image.network(
-                                          // Agregamos timestamp para evitar caché al actualizar
-                                          imageUrl.contains('drive.google')
-                                              ? imageUrl
-                                              : '$imageUrl?t=${DateTime.now().millisecondsSinceEpoch}',
+                                          // FORZAMOS LA CACHÉ AGREGANDO TIMESTAMP SIEMPRE EN EDICIÓN
+                                          // Así, en cuanto subas una foto, la verás actualizada al instante
+                                          '$imageUrl${imageUrl.contains('?') ? '&' : '?'}t=${DateTime.now().millisecondsSinceEpoch}',
                                           fit: BoxFit.cover,
                                           errorBuilder: (c, e, s) => const Icon(
                                             Icons.image_not_supported,

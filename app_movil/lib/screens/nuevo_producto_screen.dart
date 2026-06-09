@@ -104,9 +104,14 @@ class _NuevoProductoScreenState extends State<NuevoProductoScreen> {
 
     setState(() => isSaving = true);
 
+    // Definimos la clave aquí arriba para que esté disponible en todo el bloque
+    final String claveDefinida = claveCtrl.text.trim();
+
     final payload = {
-      'Clave': claveCtrl.text.trim(),
+      'Clave': claveDefinida,
       'Descripcion': descCtrl.text.trim().toUpperCase(),
+      // Ahora usamos la variable que sí declaramos arriba
+      'Foto': '$claveDefinida.jpg',
       'CB': cbCtrl.text.trim(),
       'ClavePro': claveProCtrl.text.trim(),
       'PCosto': costoCtrl.text,
@@ -140,7 +145,7 @@ class _NuevoProductoScreenState extends State<NuevoProductoScreen> {
             ),
           );
 
-          final String claveFinal = resBody['producto'] != null
+          final String claveRespuesta = resBody['producto'] != null
               ? resBody['producto']['Clave'].toString()
               : resBody['clave'].toString();
 
@@ -148,7 +153,7 @@ class _NuevoProductoScreenState extends State<NuevoProductoScreen> {
             context,
             MaterialPageRoute(
               builder: (context) => EdicionProductoScreen(
-                clave: claveFinal,
+                clave: claveRespuesta,
                 baseUrl: widget.baseUrl,
                 userRole: widget.userRole,
                 sucursalNames: widget.sucursalNames,
