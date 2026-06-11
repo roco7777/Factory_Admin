@@ -10,8 +10,10 @@ import 'reportes_screen.dart';
 import 'historico_screen.dart';
 import 'gestion_usuarios_screen.dart';
 import 'gestion_roles_screen.dart';
-import 'lanzamientos_screen.dart'; // <--- 1. NUEVA IMPORTACIÓN
+import 'lanzamientos_screen.dart';
 import 'avisos_admin_screen.dart';
+import 'hub_inventario_screen.dart';
+import 'escaner_inventario_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String baseUrl;
@@ -183,27 +185,36 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               ),
               const SizedBox(height: 20),
-              _buildReportTile(
-                icon: Icons.bolt_rounded,
-                color: Colors.amber[700]!,
-                title: "Corte en Vivo",
-                subtitle: "Ventas registradas el día de hoy",
-                onTap: () {
-                  Navigator.pop(context);
-                  _navegarA(PantallaReportes(baseUrl: widget.baseUrl));
-                },
-              ),
-              const Divider(color: grisBordes),
-              _buildReportTile(
-                icon: Icons.history_rounded,
-                color: azulAcento,
-                title: "Histórico de Ventas",
-                subtitle: "Consulta cierres de fechas pasadas",
-                onTap: () {
-                  Navigator.pop(context);
-                  _navegarA(PantallaHistorico(baseUrl: widget.baseUrl));
-                },
-              ),
+
+              if (SecurityService.tienePermiso('rep_ver_vivo') ||
+                  rolUsuario == 'Superusuario')
+                _buildReportTile(
+                  icon: Icons.bolt_rounded,
+                  color: Colors.amber[700]!,
+                  title: "Corte en Vivo",
+                  subtitle: "Ventas registradas el día de hoy",
+                  onTap: () {
+                    Navigator.pop(context);
+                    _navegarA(PantallaReportes(baseUrl: widget.baseUrl));
+                  },
+                ),
+
+              if (SecurityService.tienePermiso('rep_ver_vivo') ||
+                  rolUsuario == 'Superusuario')
+                const Divider(color: grisBordes),
+
+              if (SecurityService.tienePermiso('rep_ver_historico') ||
+                  rolUsuario == 'Superusuario')
+                _buildReportTile(
+                  icon: Icons.history_rounded,
+                  color: azulAcento,
+                  title: "Histórico de Ventas",
+                  subtitle: "Consulta cierres de fechas pasadas",
+                  onTap: () {
+                    Navigator.pop(context);
+                    _navegarA(PantallaHistorico(baseUrl: widget.baseUrl));
+                  },
+                ),
               const SizedBox(height: 20),
             ],
           ),
@@ -296,8 +307,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final bool esSuperUser = rolUsuario == 'Superusuario';
+
+    // --- LÓGICA DE VALIDACIÓN DE PERMISOS ---
     final bool puedeGestionarUsuarios =
-        SecurityService.tienePermiso('admin_usuarios') || esSuperUser;
+        esSuperUser || SecurityService.tienePermiso('admin_usuarios');
+    final bool puedeVerInventario =
+        esSuperUser || SecurityService.tienePermiso('inv_ver');
+    final bool puedeVerLanzamientos =
+        esSuperUser || SecurityService.tienePermiso('lanzamientos_ver');
+    final bool puedeVerAvisos =
+        esSuperUser || SecurityService.tienePermiso('avisos_ver');
+    final bool puedeAdministrarInventario =
+        esSuperUser || SecurityService.tienePermiso('inv_admin_sesiones');
+
+    final bool puedeContarInventario =
+        esSuperUser || SecurityService.tienePermiso('inv_conteo_fisico');
+
+    final bool puedeVerReportes =
+        esSuperUser ||
+        SecurityService.tienePermiso('rep_ver_vivo') ||
+        SecurityService.tienePermiso('rep_ver_historico');
 
     return Scaffold(
       backgroundColor: fondoGris,
@@ -434,120 +463,152 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ),
       ),
-      body: Column(
-        children: [
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(25, 10, 25, 40),
-            decoration: const BoxDecoration(
-              color: azulPrimario,
-              borderRadius: BorderRadius.only(
-                bottomLeft: Radius.circular(40),
-                bottomRight: Radius.circular(40),
+      // ---> AQUÍ SE APLICÓ EL CAMBIO DEL SAFEAREA
+      body: SafeArea(
+        bottom: true,
+        child: Column(
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(25, 10, 25, 40),
+              decoration: const BoxDecoration(
+                color: azulPrimario,
+                borderRadius: BorderRadius.only(
+                  bottomLeft: Radius.circular(40),
+                  bottomRight: Radius.circular(40),
+                ),
+              ),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 28,
+                    backgroundColor: esSuperUser ? Colors.amber : azulAcento,
+                    child: Icon(
+                      esSuperUser
+                          ? Icons.verified_user
+                          : Icons.admin_panel_settings,
+                      size: 30,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(width: 20),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        esSuperUser ? "Modo Master activo," : "Operando como,",
+                        style: const TextStyle(
+                          color: Colors.white60,
+                          fontSize: 12,
+                        ),
+                      ),
+                      Text(
+                        nombreUsuario.toUpperCase(),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 28,
-                  backgroundColor: esSuperUser ? Colors.amber : azulAcento,
-                  child: Icon(
-                    esSuperUser
-                        ? Icons.verified_user
-                        : Icons.admin_panel_settings,
-                    size: 30,
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(width: 20),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      esSuperUser ? "Modo Master activo," : "Operando como,",
-                      style: const TextStyle(
-                        color: Colors.white60,
-                        fontSize: 12,
+            const SizedBox(height: 25),
+            Expanded(
+              child: GridView.count(
+                // ---> AQUÍ SE APLICÓ EL ESPACIO INFERIOR EXTRA (30)
+                padding: const EdgeInsets.fromLTRB(25, 0, 25, 30),
+                crossAxisCount: 2,
+                crossAxisSpacing: 18,
+                mainAxisSpacing: 18,
+                children: [
+                  if (puedeAdministrarInventario)
+                    _buildMenuCard(
+                      icon: Icons.assignment_turned_in_outlined,
+                      title: "Admin Inventario",
+                      color: Colors.indigo,
+                      onTap: () => _navegarA(
+                        HubInventarioScreen(baseUrl: widget.baseUrl),
                       ),
                     ),
-                    Text(
-                      nombreUsuario.toUpperCase(),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 18,
+
+                  if (puedeContarInventario)
+                    _buildMenuCard(
+                      icon: Icons.qr_code_scanner_rounded,
+                      title: "Conteo Físico",
+                      color: Colors.green,
+                      onTap: () => _navegarA(
+                        EscanerInventarioScreen(baseUrl: widget.baseUrl),
                       ),
                     ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 25),
-          Expanded(
-            child: GridView.count(
-              padding: const EdgeInsets.symmetric(horizontal: 25),
-              crossAxisCount: 2,
-              crossAxisSpacing: 18,
-              mainAxisSpacing: 18,
-              children: [
-                _buildMenuCard(
-                  icon: Icons.inventory_2_outlined,
-                  title: "Inventario",
-                  color: azulAcento,
-                  onTap: () => _navegarA(
-                    PantallaInventario(
-                      userRole: rolUsuario,
-                      baseUrl: widget.baseUrl,
+
+                  if (puedeVerInventario)
+                    _buildMenuCard(
+                      icon: Icons.inventory_2_outlined,
+                      title: "Inventario",
+                      color: azulAcento,
+                      onTap: () => _navegarA(
+                        PantallaInventario(
+                          userRole: rolUsuario,
+                          baseUrl: widget.baseUrl,
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-                // --- 2. NUEVO BOTÓN DE LANZAMIENTOS ---
-                _buildMenuCard(
-                  icon: Icons.rocket_launch_outlined,
-                  title: "Lanzamientos",
-                  color: Colors.deepPurple,
-                  onTap: () => _navegarA(
-                    LanzamientosScreen(
-                      baseUrl: widget.baseUrl,
-                      userRole: rolUsuario, // <--- ESTO ES LO ÚNICO NUEVO AQUÍ
+
+                  if (puedeVerLanzamientos)
+                    _buildMenuCard(
+                      icon: Icons.rocket_launch_outlined,
+                      title: "Lanzamientos",
+                      color: Colors.deepPurple,
+                      onTap: () => _navegarA(
+                        LanzamientosScreen(
+                          baseUrl: widget.baseUrl,
+                          userRole: rolUsuario,
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-                // --- NUEVO BOTÓN DE AVISOS ---
-                _buildMenuCard(
-                  icon: Icons.campaign_outlined,
-                  title: "Avisos Tienda",
-                  color: Colors.amber[700]!,
-                  onTap: () =>
-                      _navegarA(AvisosAdminScreen(baseUrl: widget.baseUrl)),
-                ),
-                _buildMenuCard(
-                  icon: Icons.analytics_outlined,
-                  title: "Reportes",
-                  color: Colors.orange[800]!,
-                  onTap: _mostrarOpcionesReportes,
-                ),
-                if (puedeGestionarUsuarios)
+
+                  if (puedeVerAvisos)
+                    _buildMenuCard(
+                      icon: Icons.campaign_outlined,
+                      title: "Avisos Tienda",
+                      color: Colors.amber[700]!,
+                      onTap: () =>
+                          _navegarA(AvisosAdminScreen(baseUrl: widget.baseUrl)),
+                    ),
+
+                  if (puedeVerReportes)
+                    _buildMenuCard(
+                      icon: Icons.analytics_outlined,
+                      title: "Reportes",
+                      color: Colors.orange[800]!,
+                      onTap: _mostrarOpcionesReportes,
+                    ),
+
+                  if (puedeGestionarUsuarios)
+                    _buildMenuCard(
+                      icon: Icons.manage_accounts_outlined,
+                      title: "Usuarios",
+                      color: Colors.teal,
+                      onTap: () => _navegarA(
+                        GestionUsuariosScreen(baseUrl: widget.baseUrl),
+                      ),
+                    ),
+
                   _buildMenuCard(
-                    icon: Icons.manage_accounts_outlined,
-                    title: "Usuarios",
-                    color: Colors.teal,
-                    onTap: () => _navegarA(
-                      GestionUsuariosScreen(baseUrl: widget.baseUrl),
-                    ),
+                    icon: Icons.point_of_sale_rounded,
+                    title: "Ventas",
+                    color: Colors.grey,
+                    isLocked: true,
+                    onTap: () => _mostrarMensajeProximamente("Punto de Venta"),
                   ),
-                _buildMenuCard(
-                  icon: Icons.point_of_sale_rounded,
-                  title: "Ventas",
-                  color: Colors.grey,
-                  isLocked: true,
-                  onTap: () => _mostrarMensajeProximamente("Punto de Venta"),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

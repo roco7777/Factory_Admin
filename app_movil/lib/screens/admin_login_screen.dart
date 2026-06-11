@@ -3,9 +3,8 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/constants.dart';
-import '../core/security_service.dart'; // <--- IMPORTANTE: Importamos el nuevo servicio
-import 'dashboard_screen.dart';
 import '../core/security_service.dart';
+import 'dashboard_screen.dart';
 
 class AdminLoginScreen extends StatefulWidget {
   final String baseUrl;
@@ -50,13 +49,10 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
         );
         await prefs.setString('saved_rol', data['rol']?.toString() ?? 'Normal');
 
-        // Guardamos la lista de slugs que viene del servidor
+        // Guardamos la lista de slugs delegando la tarea al SecurityService
         if (data['permisos'] != null) {
           List<String> listaPermisos = List<String>.from(data['permisos']);
-          await prefs.setStringList('user_permissions', listaPermisos);
-
-          // Cargamos los permisos en el servicio inmediatamente para que estén listos
-          await SecurityService.cargarPermisos();
+          await SecurityService.setPermisos(listaPermisos);
         }
         // ---------------------------------------------------
 
@@ -86,7 +82,6 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // El resto de tu UI se mantiene igual, ya tiene el estilo Factory Pro.
     return Scaffold(
       backgroundColor: fondoGris,
       appBar: AppBar(

@@ -253,7 +253,7 @@ class _LanzamientosScreenState extends State<LanzamientosScreen> {
       backgroundColor: fondoGris,
       appBar: AppBar(
         title: const Text(
-          "Lanzamientos HIATECH",
+          "Lanzamientos",
           style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
         ),
         backgroundColor: azulPrimario,
@@ -292,133 +292,144 @@ class _LanzamientosScreenState extends State<LanzamientosScreen> {
           ),
         ],
       ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator(color: azulPrimario))
-          : lotes.isEmpty
-          ? const Center(child: Text("No hay lotes programados"))
-          : ListView.builder(
-              padding: const EdgeInsets.all(15),
-              itemCount: lotes.length,
-              itemBuilder: (context, index) {
-                final lote = lotes[index];
-                final String fecha = lote['FechaLote'];
-                final bool yaPublicado =
-                    (int.tryParse(lote['TotalPendientes'].toString()) ?? 0) ==
-                    0;
-                final String totalProd =
-                    (lote['total_productos'] ??
-                            lote['TotalProductos'] ??
-                            lote['Total'] ??
-                            '0')
-                        .toString();
+      // ---> APLICACIÓN DE SAFEAREA PARA LISTA PRINCIPAL DE LOTES
+      body: SafeArea(
+        bottom: true,
+        child: isLoading
+            ? const Center(
+                child: CircularProgressIndicator(color: azulPrimario),
+              )
+            : lotes.isEmpty
+            ? const Center(child: Text("No hay lotes programados"))
+            : ListView.builder(
+                padding: const EdgeInsets.fromLTRB(
+                  15,
+                  15,
+                  15,
+                  30,
+                ), // Margen inferior extra
+                itemCount: lotes.length,
+                itemBuilder: (context, index) {
+                  final lote = lotes[index];
+                  final String fecha = lote['FechaLote'];
+                  final bool yaPublicado =
+                      (int.tryParse(lote['TotalPendientes'].toString()) ?? 0) ==
+                      0;
+                  final String totalProd =
+                      (lote['total_productos'] ??
+                              lote['TotalProductos'] ??
+                              lote['Total'] ??
+                              '0')
+                          .toString();
 
-                return Card(
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(15),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(15),
-                    child: Column(
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  fecha,
-                                  style: const TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                    color: azulPrimario,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 4,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: azulAcento.withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Text(
-                                    "$totalProd productos",
+                  return Card(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(15),
+                      child: Column(
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    fecha,
                                     style: const TextStyle(
-                                      color: azulAcento,
+                                      fontSize: 18,
                                       fontWeight: FontWeight.bold,
-                                      fontSize: 12,
+                                      color: azulPrimario,
                                     ),
                                   ),
-                                ),
-                              ],
-                            ),
-                            Badge(
-                              label: Text(
-                                yaPublicado ? "PUBLICADO" : "PROGRAMADO",
+                                  const SizedBox(height: 4),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: azulAcento.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      "$totalProd productos",
+                                      style: const TextStyle(
+                                        color: azulAcento,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                              backgroundColor: yaPublicado
-                                  ? azulPrimario
-                                  : Colors.orange,
-                            ),
-                          ],
-                        ),
-                        const Divider(height: 25),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            TextButton.icon(
-                              onPressed: () => Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => DetalleLoteScreen(
-                                    fecha: fecha,
-                                    baseUrl: widget.baseUrl,
-                                    userRole: widget.userRole,
-                                    yaPublicado: yaPublicado,
+                              Badge(
+                                label: Text(
+                                  yaPublicado ? "PUBLICADO" : "PROGRAMADO",
+                                ),
+                                backgroundColor: yaPublicado
+                                    ? azulPrimario
+                                    : Colors.orange,
+                              ),
+                            ],
+                          ),
+                          const Divider(height: 25),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              TextButton.icon(
+                                onPressed: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => DetalleLoteScreen(
+                                      fecha: fecha,
+                                      baseUrl: widget.baseUrl,
+                                      userRole: widget.userRole,
+                                      yaPublicado: yaPublicado,
+                                    ),
+                                  ),
+                                ).then((_) => _cargarLotes()),
+                                icon: const Icon(
+                                  Icons.inventory_2,
+                                  color: azulAcento,
+                                ),
+                                label: const Text(
+                                  "Gestionar Lote",
+                                  style: TextStyle(
+                                    color: azulAcento,
+                                    fontWeight: FontWeight.bold,
                                   ),
                                 ),
-                              ).then((_) => _cargarLotes()),
-                              icon: const Icon(
-                                Icons.inventory_2,
-                                color: azulAcento,
                               ),
-                              label: const Text(
-                                "Gestionar Lote",
-                                style: TextStyle(
-                                  color: azulAcento,
-                                  fontWeight: FontWeight.bold,
+                              ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: yaPublicado
+                                      ? Colors.blueGrey
+                                      : azulPrimario,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 20,
+                                  ),
+                                ),
+                                onPressed: () => _procesarLote(
+                                  fecha,
+                                  yaPublicado ? 'revertir' : 'publicar',
+                                ),
+                                child: Text(
+                                  yaPublicado ? "REVERTIR" : "PUBLICAR",
                                 ),
                               ),
-                            ),
-                            ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: yaPublicado
-                                    ? Colors.blueGrey
-                                    : azulPrimario,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 20,
-                                ),
-                              ),
-                              onPressed: () => _procesarLote(
-                                fecha,
-                                yaPublicado ? 'revertir' : 'publicar',
-                              ),
-                              child: Text(
-                                yaPublicado ? "REVERTIR" : "PUBLICAR",
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                );
-              },
-            ),
+                  );
+                },
+              ),
+      ),
     );
   }
 }
@@ -594,15 +605,24 @@ class _DetalleLoteScreenState extends State<DetalleLoteScreen> {
             ),
         ],
       ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView.builder(
-              key: const PageStorageKey('scroll_productos_lote'),
-              padding: const EdgeInsets.all(12),
-              itemCount: productos.length,
-              itemBuilder: (context, index) =>
-                  _buildProductoCard(productos[index], index),
-            ),
+      // ---> APLICACIÓN DE SAFEAREA PARA LISTA DE PRODUCTOS
+      body: SafeArea(
+        bottom: true,
+        child: isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : ListView.builder(
+                key: const PageStorageKey('scroll_productos_lote'),
+                padding: const EdgeInsets.fromLTRB(
+                  12,
+                  12,
+                  12,
+                  30,
+                ), // Margen inferior extra
+                itemCount: productos.length,
+                itemBuilder: (context, index) =>
+                    _buildProductoCard(productos[index], index),
+              ),
+      ),
     );
   }
 
